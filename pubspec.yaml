@@ -10,6 +10,10 @@ dependencies:
   flutter:
     sdk: flutter
   shared_preferences: ^2.2.0
+  # Composer un numéro et ouvrir un lien officiel : l'écran Plan et infos porte le numéro du
+  # transport à la demande et celui des boutiques. Recopier un numéro à la main, debout à un
+  # arrêt, n'est pas une option. Repli prévu dans le code si l'ouverture échoue.
+  url_launcher: ^6.3.0
 
 dev_dependencies:
   flutter_test:
@@ -22,3 +26,4 @@ flutter:
     - assets/data/network.json
     - assets/data/alerts.json
     - assets/data/fares.json
+    - assets/data/places.json

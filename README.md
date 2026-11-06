@@ -162,6 +162,42 @@ validé → correspondance de 60 minutes → voyage suivant, jusqu'à épuisemen
 jusqu'à minuit et ne se valide qu'une fois. Revalider pendant une correspondance ne consomme pas de
 voyage.
 
+## Plan du réseau : tracé depuis les données, pas copié
+
+Le plan publié par l'exploitant est son travail et son identité visuelle : il n'est pas repris.
+Le plan de l'application est **dessiné depuis le GTFS** (`NetworkMap` dans `lib/main.dart`) :
+coordonnées des 167 arrêts, ordre de passage des 29 parcours, couleurs des lignes. Projection
+équirectangulaire corrigée par la latitude, suffisante pour 30 km de côté.
+
+C'est un **schéma d'arrêt à arrêt** : les segments sont droits là où le bus suit les rues, et
+l'écran le dit. Le GTFS contient la géométrie réelle (`shapes.txt`) ; la reprendre alourdirait le
+fichier embarqué d'environ 300 Ko, ce qui n'est pas justifié tant que le plan sert à se repérer.
+
+Toucher un badge isole une ligne (les autres passent en gris), `InteractiveViewer` donne le zoom et
+le déplacement sans aucune dépendance.
+
+## Informations pratiques
+
+`assets/data/places.json` : boutiques, transport à la demande, liens officiels. Ce sont de **vraies
+adresses et de vrais numéros**, relevés le 06/11/2026 sur <https://www.monrezo.org/nous-contacter/>
+et <https://www.monrezo.org/monrezo-tad/>. Le fichier porte sa source et sa date, l'écran les
+affiche : ce sont les seules informations de l'application avec lesquelles quelqu'un va **agir**
+— composer un numéro, se déplacer jusqu'à un guichet — et elles doivent être revérifiées avant
+toute diffusion.
+
+Un lien dont l'URL n'est pas en `http(s)` est refusé à la lecture : un libellé rassurant ne doit pas
+pouvoir faire ouvrir autre chose qu'une page web.
+
+### La dépendance `url_launcher`
+
+C'est la première dépendance ajoutée au-delà de `geolocator` et `shared_preferences`, et le brief
+impose de la justifier. L'écran porte le numéro du transport à la demande et ceux des deux
+boutiques : recopier un numéro à la main, debout à un arrêt, n'est pas une option — encore moins
+pour le public visé. `url_launcher` est le seul moyen de composer un numéro et d'ouvrir un lien
+depuis Flutter. Repli prévu : si rien ne s'ouvre, le numéro part dans le presse-papiers et reste
+lisible en grand à l'écran. Les tests injectent l'ouverture et vérifient **ce qui serait composé**
+(`tel:+33385730110`) sans rien ouvrir.
+
 ## Quand la CUCM publie un nouveau GTFS
 
 Refaire l'étape 2, vérifier le résumé imprimé (8 lignes, période de validité), lancer `flutter test`,

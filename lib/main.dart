@@ -2,12 +2,17 @@
 // Infos trafic, Mes titres et Plus sont des coquilles à compléter (voir CLAUDE.md, périmètre).
 
 import 'dart:async';
+import 'dart:math' as math;
+import 'dart:ui' show PointMode;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'data/alerts.dart';
 import 'data/network.dart';
+import 'data/places.dart';
 import 'data/tickets.dart';
 import 'data/schedule.dart';
 
@@ -96,7 +101,7 @@ class _ShellState extends State<Shell> {
       LinesScreen(net: widget.net, sched: sched, favorites: favorites, onChanged: () => setState(() {})),
       AlertsScreen(net: widget.net),
       const TicketsScreen(),
-      const PlaceholderScreen(title: 'Plus', hint: 'Plan du réseau, boutiques, TAD, mentions.'),
+      PlacesScreen(net: widget.net),
     ];
     return Scaffold(
       body: SafeArea(child: pages[tab]),
@@ -1803,6 +1808,468 @@ String _countdownWords(Duration d) {
 String _frJjMmAaaa(String? iso) {
   final d = DateTime.tryParse(iso ?? '');
   return d == null ? (iso ?? '') : '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+}
+
+// ---------------------------------------------------------------------------------------------
+// Écran 5 : plan du réseau, boutiques, transport à la demande, liens officiels
+// ---------------------------------------------------------------------------------------------
+
+/// Ouvre un lien (page web, numéro de téléphone, courriel). Renvoie false si rien ne s'est ouvert.
+typedef LinkOpener = Future<bool> Function(String url);
+
+Future<bool> _defaultOpener(String url) async {
+  try {
+    return await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  } catch (_) {
+    return false;
+  }
+}
+
+class PlacesScreen extends StatefulWidget {
+  const PlacesScreen({super.key, required this.net, this.loader, this.opener});
+  final Network net;
+  final Future<PracticalInfo> Function()? loader;
+
+  /// Comment ouvrir un lien. Injectable : les tests vérifient ce qui serait composé,
+  /// sans rien ouvrir pour de vrai.
+  final LinkOpener? opener;
+
+  @override
+  State<PlacesScreen> createState() => _PlacesScreenState();
+}
+
+class _PlacesScreenState extends State<PlacesScreen> {
+  late Future<PracticalInfo> _info = (widget.loader ?? PracticalInfo.load)();
+  String? _selectedRoute;
+
+  void _reload() {
+    setState(() {
+      _info = (widget.loader ?? PracticalInfo.load)();
+    });
+  }
+
+  Future<void> _open(String url, {required String copyIfFailed}) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await (widget.opener ?? _defaultOpener)(url);
+    if (ok) return;
+    // Repli : si rien ne s'ouvre, au moins l'information part dans le presse-papiers.
+    await Clipboard.setData(ClipboardData(text: copyIfFailed));
+    messenger.showSnackBar(SnackBar(content: Text('Copié : $copyIfFailed')));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Plan et infos')),
+      body: FutureBuilder<PracticalInfo>(
+        future: _info,
+        builder: (context, snap) {
+          if (snap.hasError) {
+            return _Notice(
+              icon: Icons.cloud_off_outlined,
+              title: 'Informations indisponibles',
+              text: 'Les informations pratiques n’ont pas pu être lues.\n${snap.error}',
+              action: FilledButton.icon(onPressed: _reload, icon: const Icon(Icons.refresh), label: const Text('Réessayer')),
+            );
+          }
+          if (!snap.hasData) {
+            return const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator()));
+          }
+          final info = snap.data!;
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+            children: [
+              const _SectionHeader(icon: Icons.map_outlined, title: 'Plan du réseau'),
+              const SizedBox(height: 8),
+              _MapCard(
+                net: widget.net,
+                selected: _selectedRoute,
+                onSelect: (id) => setState(() => _selectedRoute = _selectedRoute == id ? null : id),
+                onExpand: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => _MapPage(net: widget.net, selected: _selectedRoute),
+                )),
+              ),
+              const SizedBox(height: 22),
+              const _SectionHeader(icon: Icons.storefront_outlined, title: 'Boutiques'),
+              const SizedBox(height: 8),
+              for (final s in info.shops)
+                _ShopCard(shop: s, onCall: () => _open(telUri(s.phone), copyIfFailed: s.phone)),
+              if (info.shops.isEmpty) const Text('Aucune boutique renseignée.', style: TextStyle(color: Colors.black54)),
+              const SizedBox(height: 22),
+              if (info.onDemand != null) ...[
+                _SectionHeader(icon: Icons.phone_in_talk_outlined, title: info.onDemand!.title),
+                const SizedBox(height: 8),
+                _OnDemandCard(
+                  info: info.onDemand!,
+                  onCall: () => _open(telUri(info.onDemand!.phone), copyIfFailed: info.onDemand!.phone),
+                ),
+                const SizedBox(height: 22),
+              ],
+              const _SectionHeader(icon: Icons.link_outlined, title: 'Liens officiels'),
+              const SizedBox(height: 8),
+              Card(
+                elevation: 0,
+                color: Colors.white,
+                margin: EdgeInsets.zero,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFFE2E8F0))),
+                child: Column(
+                  children: [
+                    for (final l in info.links)
+                      ListTile(
+                        leading: const Icon(Icons.open_in_new, color: kTeal),
+                        title: Text(l.label, style: const TextStyle(fontWeight: FontWeight.w600, color: kInk)),
+                        onTap: () => _open(l.url, copyIfFailed: l.url),
+                      ),
+                    if (info.email.isNotEmpty)
+                      ListTile(
+                        leading: const Icon(Icons.mail_outline, color: kTeal),
+                        title: const Text('Écrire au service client', style: TextStyle(fontWeight: FontWeight.w600, color: kInk)),
+                        subtitle: Text(info.email, style: const TextStyle(fontSize: 12)),
+                        onTap: () => _open('mailto:${info.email}', copyIfFailed: info.email),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 22),
+              const _SectionHeader(icon: Icons.info_outline, title: 'D’où viennent ces informations'),
+              const SizedBox(height: 8),
+              Text(
+                [
+                  'Horaires : données ouvertes de la collectivité, converties le ${widget.net.generated}, valables du ${_frAaaammjj(widget.net.validFrom)} au ${_frAaaammjj(widget.net.validTo)}.',
+                  if (info.source != null)
+                    'Boutiques et transport à la demande : relevés le ${_frJjMmAaaa(info.fetched)} sur ${info.source}.',
+                  'Tout est embarqué dans l’application : elle fonctionne sans réseau et n’envoie aucune donnée.',
+                ].join('\n\n'),
+                style: const TextStyle(fontSize: 12, color: Colors.black54, height: 1.5),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.icon, required this.title});
+  final IconData icon;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 20, color: kTeal),
+        const SizedBox(width: 8),
+        Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: kInk))),
+      ],
+    );
+  }
+}
+
+class _MapCard extends StatelessWidget {
+  const _MapCard({required this.net, required this.selected, required this.onSelect, required this.onExpand});
+  final Network net;
+  final String? selected;
+  final void Function(String routeId) onSelect;
+  final VoidCallback onExpand;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      color: Colors.white,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFFE2E8F0))),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              height: 260,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: InteractiveViewer(
+                  maxScale: 8,
+                  child: NetworkMap(net: net, selected: selected),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final r in net.routes)
+                  GestureDetector(
+                    onTap: () => onSelect(r.id),
+                    child: Opacity(
+                      opacity: selected == null || selected == r.id ? 1 : 0.35,
+                      child: RouteBadge(route: r, size: 0.95),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              selected == null
+                  ? 'Touchez une ligne pour l’isoler. Pincez pour zoomer.'
+                  : 'Ligne isolée. Touchez-la de nouveau pour tout réafficher.',
+              style: const TextStyle(fontSize: 12, color: Colors.black54),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Schéma tracé depuis les données ouvertes, d’arrêt à arrêt : les parcours réels suivent les rues.',
+              style: TextStyle(fontSize: 12, color: Colors.black54),
+            ),
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(onPressed: onExpand, icon: const Icon(Icons.open_in_full), label: const Text('Agrandir')),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MapPage extends StatefulWidget {
+  const _MapPage({required this.net, required this.selected});
+  final Network net;
+  final String? selected;
+
+  @override
+  State<_MapPage> createState() => _MapPageState();
+}
+
+class _MapPageState extends State<_MapPage> {
+  late String? selected = widget.selected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Plan du réseau')),
+      body: Column(
+        children: [
+          Expanded(
+            child: Container(
+              color: Colors.white,
+              child: InteractiveViewer(maxScale: 12, child: NetworkMap(net: widget.net, selected: selected)),
+            ),
+          ),
+          Container(
+            color: Colors.white,
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+            width: double.infinity,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final r in widget.net.routes)
+                      GestureDetector(
+                        onTap: () => setState(() => selected = selected == r.id ? null : r.id),
+                        child: Opacity(
+                          opacity: selected == null || selected == r.id ? 1 : 0.35,
+                          child: RouteBadge(route: r),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                const Text('Schéma d’arrêt à arrêt, tracé depuis les données ouvertes.',
+                    style: TextStyle(fontSize: 12, color: Colors.black54)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Le réseau dessiné depuis les coordonnées des arrêts et l'ordre des parcours.
+/// Rien n'est repris du plan publié par l'exploitant : tout vient des données ouvertes.
+class NetworkMap extends StatelessWidget {
+  const NetworkMap({super.key, required this.net, this.selected});
+  final Network net;
+  final String? selected;
+
+  @override
+  Widget build(BuildContext context) {
+    if (net.stops.isEmpty) {
+      return const Center(child: Text('Aucun arrêt à afficher.', style: TextStyle(color: Colors.black54)));
+    }
+    return Semantics(
+      label: 'plan schématique du réseau',
+      child: SizedBox.expand(child: CustomPaint(painter: _NetworkMapPainter(net: net, selected: selected))),
+    );
+  }
+}
+
+class _NetworkMapPainter extends CustomPainter {
+  _NetworkMapPainter({required this.net, required this.selected});
+  final Network net;
+  final String? selected;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (net.stops.isEmpty) return;
+    var minLat = 90.0, maxLat = -90.0, minLon = 180.0, maxLon = -180.0;
+    for (final s in net.stops) {
+      if (s.lat < minLat) minLat = s.lat;
+      if (s.lat > maxLat) maxLat = s.lat;
+      if (s.lon < minLon) minLon = s.lon;
+      if (s.lon > maxLon) maxLon = s.lon;
+    }
+    // Projection suffisante pour 30 km de côté : on corrige la longitude par la latitude.
+    final kx = math.cos((minLat + maxLat) / 2 * math.pi / 180);
+    final spanX = (maxLon - minLon) * kx, spanY = maxLat - minLat;
+    if (spanX <= 0 || spanY <= 0) return;
+    const pad = 10.0;
+    final scale = math.min((size.width - 2 * pad) / spanX, (size.height - 2 * pad) / spanY);
+    final dx = (size.width - spanX * scale) / 2, dy = (size.height - spanY * scale) / 2;
+    Offset at(Stop s) => Offset(dx + (s.lon - minLon) * kx * scale, dy + (maxLat - s.lat) * scale);
+
+    void drawRoutes({required bool wanted}) {
+      for (final p in net.patterns) {
+        final isSelected = selected == null || p.routeId == selected;
+        if (isSelected != wanted) continue;
+        final route = net.routeById[p.routeId];
+        if (route == null) continue;
+        final pts = [
+          for (final id in p.stopIds)
+            if (net.stopById[id] != null) at(net.stopById[id]!),
+        ];
+        if (pts.length < 2) continue;
+        final paint = Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round
+          ..strokeWidth = wanted ? 2.6 : 1.4
+          ..color = wanted ? spineOn(hexColor(route.color)) : const Color(0xFFD7DEE5);
+        canvas.drawPoints(PointMode.polygon, pts, paint);
+      }
+    }
+
+    // Les lignes non retenues passent d'abord, en gris : le réseau reste lisible autour.
+    if (selected != null) drawRoutes(wanted: false);
+    drawRoutes(wanted: true);
+
+    final dot = Paint()..color = const Color(0xFF64748B);
+    for (final s in net.stops) {
+      canvas.drawCircle(at(s), 1.6, dot);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_NetworkMapPainter old) => old.net != net || old.selected != selected;
+}
+
+class _ShopCard extends StatelessWidget {
+  const _ShopCard({required this.shop, required this.onCall});
+  final Shop shop;
+  final VoidCallback onCall;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      color: Colors.white,
+      margin: const EdgeInsets.only(bottom: 10),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFFE2E8F0))),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(shop.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: kInk)),
+            const SizedBox(height: 4),
+            Text(shop.address, style: const TextStyle(fontSize: 14)),
+            const SizedBox(height: 8),
+            for (final h in shop.hours) Text(h, style: const TextStyle(fontSize: 13, color: Colors.black54)),
+            if (shop.phone.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.tonalIcon(
+                  onPressed: onCall,
+                  icon: const Icon(Icons.call),
+                  label: Text(shop.phone),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OnDemandCard extends StatelessWidget {
+  const _OnDemandCard({required this.info, required this.onCall});
+  final OnDemand info;
+  final VoidCallback onCall;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      color: Colors.white,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFFE2E8F0))),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (info.intro.isNotEmpty) ...[
+              Text(info.intro, style: const TextStyle(fontSize: 14, height: 1.35)),
+              const SizedBox(height: 12),
+            ],
+            if (info.phone.isNotEmpty)
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: onCall,
+                  icon: const Icon(Icons.call),
+                  label: Text('Réserver au ${info.phone}'),
+                ),
+              ),
+            const SizedBox(height: 12),
+            for (final h in info.hours) Text(h, style: const TextStyle(fontSize: 13, color: Colors.black54)),
+            if (info.rules.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              for (final r in info.rules)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Padding(
+                        padding: EdgeInsets.only(top: 6, right: 8),
+                        child: Icon(Icons.circle, size: 5, color: kTeal),
+                      ),
+                      Expanded(child: Text(r, style: const TextStyle(fontSize: 13, height: 1.35))),
+                    ],
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _frAaaammjj(String yyyymmdd) {
+  if (yyyymmdd.length != 8) return yyyymmdd;
+  return '${yyyymmdd.substring(6, 8)}/${yyyymmdd.substring(4, 6)}/${yyyymmdd.substring(0, 4)}';
 }
 
 // ---------------------------------------------------------------------------------------------

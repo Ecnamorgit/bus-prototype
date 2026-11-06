@@ -1,0 +1,40 @@
+{
+  "_note": "Informations publiques relevées sur le site du réseau. Ce sont de vraies adresses et de vrais numéros : ils sont datés et doivent être revérifiés avant toute diffusion.",
+  "source": "https://www.monrezo.org/nous-contacter/",
+  "fetched": "2026-11-06",
+  "shops": [
+    {
+      "name": "Boutique du Creusot",
+      "address": "Esplanade Simone Veil, 71200 Le Creusot",
+      "hours": ["Du lundi au vendredi", "9h00 – 12h30 et 13h30 – 17h00"],
+      "phone": "03 85 73 01 10"
+    },
+    {
+      "name": "Boutique de Montceau",
+      "address": "56 quai Jules Chagot, 71300 Montceau-les-Mines",
+      "hours": ["Du lundi au vendredi", "8h30 – 12h00 et 13h30 – 17h00"],
+      "phone": "03 85 69 01 10"
+    }
+  ],
+  "on_demand": {
+    "title": "Transport à la demande",
+    "intro": "Dans les communes sans ligne régulière, un véhicule vient vous chercher à un arrêt, sur réservation.",
+    "phone": "03 85 69 01 10",
+    "hours": ["Centrale de réservation", "Du lundi au vendredi, hors jours fériés", "9h00 – 12h30 et 13h30 – 16h00"],
+    "rules": [
+      "Réservez la veille de votre trajet, avant 16h.",
+      "Pour un samedi ou un dimanche, réservez le vendredi avant 16h.",
+      "Pour un jour férié, ou le lendemain d'un jour férié, réservez la veille du férié avant 16h.",
+      "Dessert Montceau, Le Creusot et Montchanin, et relie les communes rurales à ces trois centres.",
+      "Seuls les arrêts indiqués sur les fiches horaires sont desservis.",
+      "Même tarification que le reste du réseau."
+    ]
+  },
+  "email": "serviceclient.monrezo@transdev.com",
+  "links": [
+    {"label": "Site officiel du réseau", "url": "https://www.monrezo.org"},
+    {"label": "Infos trafic officielles", "url": "https://www.monrezo.org/trafic/"},
+    {"label": "Titres et tarifs", "url": "https://www.monrezo.org/tarifs-et-titres/"},
+    {"label": "Plan du réseau publié (PDF)", "url": "https://www.monrezo.org/wp-content/uploads/2023/02/Plan.pdf"}
+  ]
+}
