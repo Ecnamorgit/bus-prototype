@@ -1,5 +1,7 @@
-// Point d'entrée du MVP. Deux écrans sont réellement implémentés (Passages, Lignes) sur le vrai GTFS ;
-// Infos trafic, Mes titres et Plus sont des coquilles à compléter (voir CLAUDE.md, périmètre).
+// Point d'entrée du MVP. Les cinq écrans du périmètre (voir CLAUDE.md) sont implémentés :
+// Passages et Lignes sur le vrai GTFS, Infos trafic sur des alertes d'exemple étiquetées,
+// Mes titres sur les tarifs publics avec un achat simulé, Plan et infos sur le plan tracé
+// depuis les données et les coordonnées réelles des boutiques.
 
 import 'dart:async';
 import 'dart:math' as math;
@@ -2270,29 +2272,6 @@ class _OnDemandCard extends StatelessWidget {
 String _frAaaammjj(String yyyymmdd) {
   if (yyyymmdd.length != 8) return yyyymmdd;
   return '${yyyymmdd.substring(6, 8)}/${yyyymmdd.substring(4, 6)}/${yyyymmdd.substring(0, 4)}';
-}
-
-// ---------------------------------------------------------------------------------------------
-// Coquilles à compléter
-// ---------------------------------------------------------------------------------------------
-
-class PlaceholderScreen extends StatelessWidget {
-  const PlaceholderScreen({super.key, required this.title, required this.hint});
-  final String title;
-  final String hint;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Text('À construire : $hint', textAlign: TextAlign.center, style: const TextStyle(color: Colors.black54)),
-        ),
-      ),
-    );
-  }
 }
 
 String _hhmm(DateTime d) => '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
