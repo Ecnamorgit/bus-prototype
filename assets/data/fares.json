@@ -1,0 +1,37 @@
+{
+  "_note": "Tarifs publics relevés sur le site du réseau. Les prix sont réels ; l'achat dans cette application est une démonstration, aucun paiement n'est effectué.",
+  "source": "https://www.monrezo.org/tarifs",
+  "fetched": "2026-11-06",
+  "fares": [
+    {
+      "id": "unite",
+      "name": "Ticket unitaire",
+      "price_cents": 120,
+      "description": "Un trajet, correspondances comprises pendant 60 minutes.",
+      "trips": 1,
+      "validity_minutes": 60,
+      "all_day": false,
+      "note": ""
+    },
+    {
+      "id": "dix-voyages",
+      "name": "Titre 10 voyages",
+      "price_cents": 900,
+      "description": "Dix trajets, avec 60 minutes de correspondance à chaque voyage.",
+      "trips": 10,
+      "validity_minutes": 60,
+      "all_day": false,
+      "note": "Aujourd'hui, ce titre se charge sur une carte sans contact achetée en boutique."
+    },
+    {
+      "id": "journee",
+      "name": "Ticket journée",
+      "price_cents": 360,
+      "description": "Voyages illimités jusqu'à la fin de la journée.",
+      "trips": 0,
+      "validity_minutes": 0,
+      "all_day": true,
+      "note": "Aujourd'hui, ce titre est vendu uniquement auprès du conducteur."
+    }
+  ]
+}

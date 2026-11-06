@@ -133,6 +133,35 @@ Trois décisions qui tiendront quand les données deviendront réelles :
 Les perturbations terminées disparaissent d'elles-mêmes : le filtrage se fait à l'affichage, sur la
 date du téléphone.
 
+## Titres de transport : prix réels, achat simulé
+
+`assets/data/fares.json` contient les **tarifs publics du réseau**, relevés le 06/11/2026 sur
+<https://www.monrezo.org/tarifs> : ticket unitaire 1,20 €, titre 10 voyages 9 €, ticket journée
+3,60 €. Le fichier porte sa source et la date du relevé, et l'écran les affiche sous la grille :
+un prix sans provenance ne vaut rien dans un dossier.
+
+L'achat, lui, est une **démonstration** :
+
+- aucun paiement n'est effectué et **aucun champ de saisie n'existe dans tout le parcours** — pas de
+  formulaire de carte bancaire, même factice. Une maquette ne doit pas entraîner les gens à taper un
+  numéro de carte dans une application d'essai. Un test le vérifie écran par écran ;
+- le QR est **dessiné**, déterministe à partir de l'identifiant du titre, avec « DÉMONSTRATION » en
+  travers. Un vrai encodeur demanderait une dépendance que le brief n'autorise pas, et un faux QR
+  crédible serait pire qu'un faux QR assumé ;
+- `Ticket.bought` est le seul constructeur d'achat, et il marque le titre (`demo: true`). Rien dans
+  le code ne sait produire un titre non étiqueté ;
+- les titres sont rangés sur le téléphone (`shared_preferences`), jamais envoyés nulle part, et un
+  bouton les efface.
+
+Le catalogue affiche aussi, en clair, **comment le titre se vend réellement aujourd'hui** (« vendu
+auprès du conducteur », « à charger sur une carte sans contact ») : c'est précisément ce que la
+vente en ligne changerait.
+
+Cycle de vie d'un titre (`lib/data/tickets.dart`, testé dans `test/tickets_test.dart`) : acheté →
+validé → correspondance de 60 minutes → voyage suivant, jusqu'à épuisement ; un titre journée vaut
+jusqu'à minuit et ne se valide qu'une fois. Revalider pendant une correspondance ne consomme pas de
+voyage.
+
 ## Quand la CUCM publie un nouveau GTFS
 
 Refaire l'étape 2, vérifier le résumé imprimé (8 lignes, période de validité), lancer `flutter test`,

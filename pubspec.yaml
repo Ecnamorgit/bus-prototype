@@ -21,3 +21,4 @@ flutter:
   assets:
     - assets/data/network.json
     - assets/data/alerts.json
+    - assets/data/fares.json

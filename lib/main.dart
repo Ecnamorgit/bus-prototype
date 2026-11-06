@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'data/alerts.dart';
 import 'data/network.dart';
+import 'data/tickets.dart';
 import 'data/schedule.dart';
 
 const kInk = Color(0xFF0F2A4F);
@@ -94,7 +95,7 @@ class _ShellState extends State<Shell> {
       DeparturesScreen(net: widget.net, sched: sched, favorites: favorites, onChanged: () => setState(() {})),
       LinesScreen(net: widget.net, sched: sched, favorites: favorites, onChanged: () => setState(() {})),
       AlertsScreen(net: widget.net),
-      const PlaceholderScreen(title: 'Mes titres', hint: 'Parcours d’achat maquetté, QR factice, bandeau « démonstration ».'),
+      const TicketsScreen(),
       const PlaceholderScreen(title: 'Plus', hint: 'Plan du réseau, boutiques, TAD, mentions.'),
     ];
     return Scaffold(
@@ -871,8 +872,9 @@ class _Notice extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Défilable : à 1,6× de texte, un état vide avec son bouton dépasse la hauteur d'un téléphone.
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -947,7 +949,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
             children: [
               if (feed.allExamples)
                 const _Banner(
-                  text: 'Démonstration : ces informations sont des exemples. Elles ne viennent pas du réseau.',
+                  text: 'Démonstration : ces informations sont des exemples. Elles ne viennent pas du réseau.',
                 ),
               Expanded(
                 child: current.isEmpty && soon.isEmpty
@@ -1190,6 +1192,617 @@ String _periodLabel(TrafficAlert a, DateTime today) {
   }
   if (to != null) return 'Jusqu’au ${_frDayMonth(to)}';
   return 'En cours';
+}
+
+// ---------------------------------------------------------------------------------------------
+// Écran 4 : mes titres — parcours d'achat maquetté, aucun paiement réel
+// ---------------------------------------------------------------------------------------------
+
+class TicketsScreen extends StatefulWidget {
+  const TicketsScreen({super.key, this.catalogLoader});
+
+  /// D'où vient le catalogue tarifaire. Par défaut l'asset embarqué.
+  final Future<FareCatalog> Function()? catalogLoader;
+
+  @override
+  State<TicketsScreen> createState() => _TicketsScreenState();
+}
+
+class _TicketsScreenState extends State<TicketsScreen> {
+  final TicketWallet wallet = TicketWallet();
+  bool _ready = false;
+
+  Future<FareCatalog> _loadCatalog() => (widget.catalogLoader ?? FareCatalog.load)();
+
+  @override
+  void initState() {
+    super.initState();
+    wallet.load().then((_) {
+      if (mounted) setState(() => _ready = true);
+    });
+  }
+
+  Future<void> _buy() async {
+    final ticket = await Navigator.of(context).push<Ticket>(MaterialPageRoute(
+      builder: (_) => _BuyPage(catalog: _loadCatalog(), wallet: wallet),
+    ));
+    if (!mounted) return;
+    setState(() {});
+    if (ticket != null) {
+      await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => _TicketPage(ticket: ticket, wallet: wallet),
+      ));
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _clear() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Effacer les titres de démonstration ?'),
+        content: const Text('Ils ne sont enregistrés que sur ce téléphone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annuler')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Effacer')),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await wallet.clear();
+      if (mounted) setState(() {});
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final usable = wallet.usable(now);
+    final spent = wallet.spent(now);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Mes titres'),
+        actions: [
+          if (wallet.tickets.isNotEmpty)
+            IconButton(
+              tooltip: 'Effacer les titres de démonstration',
+              onPressed: _clear,
+              icon: const Icon(Icons.delete_outline),
+            ),
+        ],
+      ),
+      // Pas de bouton flottant quand le portefeuille est vide : l'état vide porte déjà l'action,
+      // et deux boutons identiques à l'écran font hésiter.
+      floatingActionButton: _ready && wallet.tickets.isNotEmpty
+          ? FloatingActionButton.extended(
+              onPressed: _buy,
+              icon: const Icon(Icons.add_card_outlined),
+              label: const Text('Acheter un titre'),
+            )
+          : null,
+      body: Column(
+        children: [
+          const _Banner(text: 'Démonstration : aucun paiement réel. Ces titres ne sont pas valables à bord.'),
+          Expanded(
+            child: !_ready
+                ? const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator()))
+                : wallet.tickets.isEmpty
+                    ? _Notice(
+                        icon: Icons.confirmation_number_outlined,
+                        title: 'Aucun titre',
+                        text: 'Achetez un titre pour le présenter à la montée. Tout se passe sur le téléphone, sans compte.',
+                        action: FilledButton.icon(
+                          onPressed: _buy,
+                          icon: const Icon(Icons.add_card_outlined),
+                          label: const Text('Acheter un titre'),
+                        ),
+                      )
+                    : ListView(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+                        children: [
+                          for (final t in usable)
+                            _TicketCard(
+                              ticket: t,
+                              now: now,
+                              onTap: () async {
+                                await Navigator.of(context).push(MaterialPageRoute(
+                                  builder: (_) => _TicketPage(ticket: t, wallet: wallet),
+                                ));
+                                if (mounted) setState(() {});
+                              },
+                            ),
+                          if (spent.isNotEmpty) ...[
+                            const SizedBox(height: 10),
+                            const Text('Titres épuisés', style: TextStyle(fontWeight: FontWeight.w800, color: kInk)),
+                            const SizedBox(height: 8),
+                            for (final t in spent) _TicketCard(ticket: t, now: now, onTap: null),
+                          ],
+                        ],
+                      ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TicketCard extends StatelessWidget {
+  const _TicketCard({required this.ticket, required this.now, required this.onTap});
+  final Ticket ticket;
+  final DateTime now;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final st = _ticketStyle(ticket, now);
+    return Card(
+      elevation: 0,
+      color: Colors.white,
+      margin: const EdgeInsets.only(bottom: 10),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFFE2E8F0))),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: st.background, shape: BoxShape.circle),
+                child: Icon(st.icon, size: 20, color: st.color),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(ticket.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: kInk)),
+                    const SizedBox(height: 3),
+                    Text(st.label, style: TextStyle(fontSize: 13, color: st.color, fontWeight: FontWeight.w600)),
+                    if (!ticket.allDay && ticket.tripsLeft > 0) ...[
+                      const SizedBox(height: 2),
+                      Text('${ticket.tripsLeft} voyage${ticket.tripsLeft > 1 ? 's' : ''} restant${ticket.tripsLeft > 1 ? 's' : ''}',
+                          style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                    ],
+                    const SizedBox(height: 8),
+                    const _ExampleTag(),
+                  ],
+                ),
+              ),
+              if (onTap != null) const Icon(Icons.chevron_right, color: Colors.black38),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Choix du titre, puis paiement simulé. Aucun champ de paiement n'est demandé : une maquette
+/// ne doit pas entraîner les gens à taper un numéro de carte dans une application d'essai.
+class _BuyPage extends StatefulWidget {
+  const _BuyPage({required this.catalog, required this.wallet});
+  final Future<FareCatalog> catalog;
+  final TicketWallet wallet;
+
+  @override
+  State<_BuyPage> createState() => _BuyPageState();
+}
+
+class _BuyPageState extends State<_BuyPage> {
+  bool _paying = false;
+
+  Future<void> _confirm(Fare fare) async {
+    final go = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => _CheckoutSheet(fare: fare),
+    );
+    if (go != true || !mounted) return;
+
+    setState(() => _paying = true);
+    // Attente volontaire : un paiement instantané donnerait l'illusion d'un vrai débit immédiat.
+    await Future<void>.delayed(const Duration(milliseconds: 900));
+    final ticket = await widget.wallet.buy(fare, DateTime.now());
+    if (!mounted) return;
+    setState(() => _paying = false);
+    Navigator.of(context).pop(ticket);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Acheter un titre')),
+      body: FutureBuilder<FareCatalog>(
+        future: widget.catalog,
+        builder: (context, snap) {
+          if (snap.hasError) {
+            return _Notice(
+              icon: Icons.cloud_off_outlined,
+              title: 'Tarifs indisponibles',
+              text: 'La grille tarifaire n’a pas pu être lue.\n${snap.error}',
+              action: FilledButton.icon(
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.arrow_back),
+                label: const Text('Revenir'),
+              ),
+            );
+          }
+          if (!snap.hasData) {
+            return const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator()));
+          }
+          final cat = snap.data!;
+          return Stack(
+            children: [
+              ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+                children: [
+                  for (final f in cat.fares)
+                    Card(
+                      elevation: 0,
+                      color: Colors.white,
+                      margin: const EdgeInsets.only(bottom: 10),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFFE2E8F0))),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: _paying ? null : () => _confirm(f),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(f.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: kInk)),
+                                    const SizedBox(height: 3),
+                                    Text(f.description, style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                                    if (f.note.isNotEmpty) ...[
+                                      const SizedBox(height: 4),
+                                      Text(f.note, style: const TextStyle(fontSize: 12, color: Color(0xFF7A4800))),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Text(formatPrice(f.priceCents),
+                                  style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 17, color: kInk)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 6),
+                  Text(
+                    cat.source == null
+                        ? 'Tarifs publics du réseau.'
+                        : 'Tarifs publics du réseau, relevés le ${_frJjMmAaaa(cat.fetched)} sur ${cat.source}.',
+                    style: const TextStyle(fontSize: 12, color: Colors.black54),
+                  ),
+                ],
+              ),
+              if (_paying)
+                Container(
+                  color: Colors.black26,
+                  child: const Center(
+                    child: Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            CircularProgressIndicator(),
+                            SizedBox(height: 14),
+                            Text('Paiement simulé…', style: TextStyle(fontWeight: FontWeight.w700)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _CheckoutSheet extends StatelessWidget {
+  const _CheckoutSheet({required this.fare});
+  final Fare fare;
+
+  @override
+  Widget build(BuildContext context) {
+    // Défilable : à 1,6× de texte, le récapitulatif dépasse la hauteur d'une feuille.
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.82),
+      child: SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Récapitulatif', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 19, color: kInk)),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(child: Text(fare.name, style: const TextStyle(fontSize: 16, color: kInk))),
+              Text(formatPrice(fare.priceCents), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: kInk)),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(fare.description, style: const TextStyle(fontSize: 13, color: Colors.black54)),
+          const SizedBox(height: 18),
+          const _Banner(text: 'Aucun paiement ne sera effectué. Aucun numéro de carte n’est demandé, ici ou ailleurs dans l’application.'),
+          const SizedBox(height: 18),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: () => Navigator.of(context).pop(true),
+              icon: const Icon(Icons.lock_outline),
+              label: const Text('Payer (simulation)'),
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Annuler')),
+          ),
+        ],
+      ),
+      ),
+    );
+  }
+}
+
+/// Le titre lui-même : ce qu'on montre à la montée. Compte à rebours vivant, QR factice.
+class _TicketPage extends StatefulWidget {
+  const _TicketPage({required this.ticket, required this.wallet});
+  final Ticket ticket;
+  final TicketWallet wallet;
+
+  @override
+  State<_TicketPage> createState() => _TicketPageState();
+}
+
+class _TicketPageState extends State<_TicketPage> {
+  late Ticket ticket = widget.ticket;
+  Timer? _tick;
+
+  @override
+  void initState() {
+    super.initState();
+    _startTicking();
+  }
+
+  /// La seconde ne tourne que pendant un voyage : un titre en attente n'a rien à décompter,
+  /// et un écran qui se redessine chaque seconde pour rien use la batterie.
+  void _startTicking() {
+    if (_tick != null || !ticket.runningAt(DateTime.now())) return;
+    _tick = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) return;
+      if (!ticket.runningAt(DateTime.now())) {
+        t.cancel();
+        _tick = null;
+      }
+      setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _validate() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Commencer le voyage ?'),
+        content: Text(ticket.allDay
+            ? 'Le titre sera valable jusqu’à la fin de la journée.'
+            : 'Un voyage sera décompté, avec ${ticket.validityMinutes} minutes de correspondance.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Pas encore')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Valider')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final updated = await widget.wallet.validate(ticket.id, DateTime.now());
+    if (updated != null && mounted) {
+      setState(() => ticket = updated);
+      _startTicking();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final st = _ticketStyle(ticket, now);
+    final reste = ticket.remainingAt(now);
+
+    return Scaffold(
+      appBar: AppBar(title: Text(ticket.name)),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+        children: [
+          const _Banner(text: 'Titre de démonstration. Il n’est pas valable à bord d’un bus.'),
+          const SizedBox(height: 14),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: st.color, width: 2),
+            ),
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Icon(st.icon, color: st.color),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(st.label,
+                          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17, color: st.color)),
+                    ),
+                  ],
+                ),
+                if (reste != null) ...[
+                  const SizedBox(height: 10),
+                  Semantics(
+                    label: 'il reste ${_countdownWords(reste)}',
+                    child: Text(_countdown(reste),
+                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 40, color: kInk)),
+                  ),
+                  const Text('avant la fin du voyage', style: TextStyle(fontSize: 13, color: Colors.black54)),
+                ],
+                const SizedBox(height: 18),
+                _FakeQr(seed: ticket.id),
+                const SizedBox(height: 14),
+                Text(ticket.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: kInk)),
+                Text(
+                  'Acheté le ${_frDayMonth(ticket.purchasedAt)} à ${_hhmm(ticket.purchasedAt)} · ${formatPrice(ticket.priceCents)}',
+                  style: const TextStyle(fontSize: 12, color: Colors.black54),
+                  textAlign: TextAlign.center,
+                ),
+                if (!ticket.allDay) ...[
+                  const SizedBox(height: 4),
+                  Text('${ticket.tripsLeft} voyage${ticket.tripsLeft > 1 ? 's' : ''} restant${ticket.tripsLeft > 1 ? 's' : ''}',
+                      style: const TextStyle(fontSize: 13, color: kInk, fontWeight: FontWeight.w600)),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          if (ticket.canValidateAt(now))
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _validate,
+                icon: const Icon(Icons.how_to_reg_outlined),
+                label: const Text('Valider mon voyage'),
+              ),
+            )
+          else if (ticket.stateAt(now) == TicketState.epuise)
+            const Text('Ce titre est épuisé.', style: TextStyle(color: Colors.black54)),
+        ],
+      ),
+    );
+  }
+}
+
+/// QR dessiné, volontairement faux : « DÉMONSTRATION » en travers, et aucun encodeur derrière.
+/// Un vrai QR demanderait une dépendance que le brief n'autorise pas — et un faux QR crédible
+/// serait pire qu'un faux QR assumé.
+class _FakeQr extends StatelessWidget {
+  const _FakeQr({required this.seed});
+  final String seed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: 'code QR de démonstration, sans valeur',
+      child: SizedBox(
+        width: 190,
+        height: 190,
+        child: CustomPaint(painter: _FakeQrPainter(seed: seed)),
+      ),
+    );
+  }
+}
+
+class _FakeQrPainter extends CustomPainter {
+  _FakeQrPainter({required this.seed});
+  final String seed;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const n = 25;
+    final cell = size.width / n;
+    final black = Paint()..color = kInk;
+    canvas.drawRect(Offset.zero & size, Paint()..color = Colors.white);
+
+    // Suite déterministe : le même titre dessine toujours le même motif.
+    var x = seed.hashCode == 0 ? 42 : seed.hashCode.abs();
+    int next() {
+      x ^= x << 13;
+      x ^= x >> 17;
+      x ^= x << 5;
+      return x.abs();
+    }
+
+    bool inFinder(int r, int c) =>
+        (r < 7 && c < 7) || (r < 7 && c >= n - 7) || (r >= n - 7 && c < 7);
+
+    for (var r = 0; r < n; r++) {
+      for (var c = 0; c < n; c++) {
+        if (inFinder(r, c)) continue;
+        if (next() % 100 < 46) {
+          canvas.drawRect(Rect.fromLTWH(c * cell, r * cell, cell, cell), black);
+        }
+      }
+    }
+
+    void finder(int r, int c) {
+      canvas.drawRect(Rect.fromLTWH(c * cell, r * cell, 7 * cell, 7 * cell), black);
+      canvas.drawRect(Rect.fromLTWH((c + 1) * cell, (r + 1) * cell, 5 * cell, 5 * cell), Paint()..color = Colors.white);
+      canvas.drawRect(Rect.fromLTWH((c + 2) * cell, (r + 2) * cell, 3 * cell, 3 * cell), black);
+    }
+
+    finder(0, 0);
+    finder(0, n - 7);
+    finder(n - 7, 0);
+
+    // Bandeau « DÉMONSTRATION » : le code ne doit jamais pouvoir passer pour un vrai titre.
+    final bandeau = Rect.fromCenter(center: Offset(size.width / 2, size.height / 2), width: size.width, height: 30);
+    canvas.drawRect(bandeau, Paint()..color = Colors.white.withValues(alpha: 0.94));
+    final tp = TextPainter(
+      text: const TextSpan(
+        text: 'DÉMONSTRATION',
+        style: TextStyle(color: Color(0xFFB3261E), fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: 1),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: size.width);
+    tp.paint(canvas, Offset((size.width - tp.width) / 2, (size.height - tp.height) / 2));
+  }
+
+  @override
+  bool shouldRepaint(_FakeQrPainter old) => old.seed != seed;
+}
+
+({Color color, Color background, IconData icon, String label}) _ticketStyle(Ticket t, DateTime now) {
+  switch (t.stateAt(now)) {
+    case TicketState.enCours:
+      return (color: const Color(0xFF0B7A6E), background: const Color(0xFFDFF5F2), icon: Icons.check_circle_outline, label: 'Voyage en cours');
+    case TicketState.aValider:
+      return (color: kInk, background: const Color(0xFFEFF3F6), icon: Icons.confirmation_number_outlined, label: 'À valider à la montée');
+    case TicketState.epuise:
+      return (color: const Color(0xFF6B7280), background: const Color(0xFFF1F3F5), icon: Icons.history, label: 'Épuisé');
+  }
+}
+
+String _countdown(Duration d) {
+  if (d.inHours >= 1) return '${d.inHours} h ${(d.inMinutes % 60).toString().padLeft(2, '0')}';
+  if (d.inMinutes >= 1) return '${d.inMinutes} min';
+  return '${d.inSeconds} s';
+}
+
+String _countdownWords(Duration d) {
+  if (d.inHours >= 1) return '${d.inHours} heures et ${d.inMinutes % 60} minutes';
+  if (d.inMinutes >= 1) return '${d.inMinutes} minutes';
+  return '${d.inSeconds} secondes';
+}
+
+String _frJjMmAaaa(String? iso) {
+  final d = DateTime.tryParse(iso ?? '');
+  return d == null ? (iso ?? '') : '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
 }
 
 // ---------------------------------------------------------------------------------------------
