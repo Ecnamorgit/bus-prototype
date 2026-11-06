@@ -268,9 +268,21 @@ flutter build apk --release
 l'installation depuis une source inconnue, c'est normal pour une application hors magasin.
 Identifiant `fr.pluriface.bus_prototype`, nom affiché « Bus — prototype », Android 7 et plus
 (`minSdk` 24), trois architectures dans le même fichier (`arm64-v8a`, `armeabi-v7a`, `x86_64`) :
-un seul lien marche sur n'importe quel téléphone. C'est ce qui explique les 46,2 Mo ;
-`flutter build apk --split-per-abi` produit trois fichiers deux fois plus légers, au prix de devoir
-choisir le bon.
+un seul lien marche sur n'importe quel téléphone. C'est ce qui explique les 46,2 Mo.
+
+Si le poids gêne (envoi par messagerie, téléphone en 4G), `--split-per-abi` découpe par
+architecture :
+
+```powershell
+flutter build apk --release --split-per-abi
+# app-arm64-v8a-release.apk    16,5 Mo  <- tous les téléphones depuis ~2015
+# app-armeabi-v7a-release.apk  14,1 Mo  <- vieux téléphones 32 bits
+# app-x86_64-release.apk       17,8 Mo  <- émulateurs, quelques tablettes
+```
+
+C'est l'arm64 qu'il faut envoyer dans la quasi-totalité des cas. Attention si l'on publie un jour :
+Flutter décale le `versionCode` de ces variantes (2001 pour arm64 contre 1 pour l'APK universel),
+pour que le magasin serve la bonne à chaque appareil.
 
 Il est signé avec la clé de débogage par défaut de Flutter (`CN=Android Debug`, schéma v2) —
 suffisant pour faire essayer un prototype, **à remplacer par une vraie clé** avant toute diffusion
