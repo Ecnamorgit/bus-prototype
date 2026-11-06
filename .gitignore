@@ -1,0 +1,16 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+*.iml
+.idea/
+
+# Données brutes (téléchargées, pas versionnées) — on versionne le JSON compact généré
+data/gtfs/*.zip
+
+# Captures
+docs/captures/*.png
+!docs/captures/.gitkeep

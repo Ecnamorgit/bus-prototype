@@ -1,0 +1,8 @@
+{
+  "_note": "Exemples fictifs pour la maquette. Format prévu pour un futur back-office exploitant.",
+  "alerts": [
+    {"id": "a1", "severity": "warning", "lines": ["M2"], "title": "Travaux rue de la République", "body": "Arrêt Hôtel de Ville non desservi jusqu'au 20 novembre. Report à l'arrêt Mairie.", "from": "2026-11-04", "to": "2026-11-20", "example": true},
+    {"id": "a2", "severity": "info", "lines": ["TGV"], "title": "Correspondances TGV garanties", "body": "Chaque arrivée et départ de TGV est desservi ; en cas de retard du train, la navette attend.", "from": "2026-11-01", "to": null, "example": true},
+    {"id": "a3", "severity": "info", "lines": [], "title": "Horaires d'hiver", "body": "Les horaires d'hiver s'appliquent à partir du 1er décembre.", "from": "2026-11-15", "to": "2026-12-01", "example": true}
+  ]
+}

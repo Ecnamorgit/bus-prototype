@@ -1,0 +1,23 @@
+name: monrezo_mvp
+description: Prototype d'application voyageurs pour le réseau monRéZO (Pluriface).
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.2.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  shared_preferences: ^2.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/data/network.json
+    - assets/data/alerts.json
