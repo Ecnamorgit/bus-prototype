@@ -619,10 +619,14 @@ class StopSearch extends SearchDelegate<Stop?> {
   final Schedule sched;
 
   @override
-  List<Widget> buildActions(BuildContext context) => [if (query.isNotEmpty) IconButton(onPressed: () => query = '', icon: const Icon(Icons.clear))];
+  List<Widget> buildActions(BuildContext context) => [
+        if (query.isNotEmpty)
+          IconButton(tooltip: 'Effacer la recherche', onPressed: () => query = '', icon: const Icon(Icons.clear)),
+      ];
 
   @override
-  Widget buildLeading(BuildContext context) => IconButton(onPressed: () => close(context, null), icon: const Icon(Icons.arrow_back));
+  Widget buildLeading(BuildContext context) =>
+      IconButton(tooltip: 'Revenir', onPressed: () => close(context, null), icon: const Icon(Icons.arrow_back));
 
   @override
   Widget buildResults(BuildContext context) => buildSuggestions(context);

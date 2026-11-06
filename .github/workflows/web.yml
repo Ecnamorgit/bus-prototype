@@ -1,0 +1,61 @@
+# Publie la version web sur GitHub Pages à chaque poussée sur la branche principale.
+#
+# À faire une fois dans le dépôt GitHub : Settings → Pages → Source = « GitHub Actions ».
+# Rien d'autre à configurer, aucun secret : le dépôt se publie lui-même.
+#
+# ATTENTION : publier sur GitHub Pages rend le prototype PUBLIC. À ne faire qu'en connaissance
+# de cause — les alertes trafic sont des exemples et l'achat est une démonstration, mais une
+# page publique peut être trouvée, citée et archivée.
+
+name: Version web
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  construire:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          # Version figée : une mise à jour de Flutter ne doit pas casser une publication
+          # sans qu'on l'ait décidé.
+          flutter-version: 3.38.7
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      # Les mêmes portes que localement : rien ne se publie si l'analyse ou les tests échouent.
+      - run: flutter analyze
+      - run: flutter test
+
+      # base-href = le nom du dépôt, puisque Pages sert le site dans un sous-dossier.
+      - run: flutter build web --release --base-href "/${{ github.event.repository.name }}/"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  publier:
+    needs: construire
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploiement.outputs.page_url }}
+    steps:
+      - id: deploiement
+        uses: actions/deploy-pages@v4

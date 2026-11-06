@@ -222,6 +222,80 @@ Le titre de l'écran est « Prochains passages » et non le nom du réseau : le 
 l'acronyme de la collectivité, qui ne dit rien à un usager. Le nom venu des données reste affiché
 dans *Plan et infos*, avec la provenance des horaires.
 
+## Installer et déployer
+
+### Web
+
+```powershell
+flutter build web --release --base-href /monrezo-mvp/
+```
+
+`--base-href` doit valoir le chemin sous lequel le site est servi : GitHub Pages publie dans un
+sous-dossier qui porte le nom du dépôt. Le résultat est dans `build/web`, entièrement statique.
+
+Pour vérifier avant publication, servir le dossier **sous ce chemin** et non à la racine :
+
+```powershell
+mkdir pages\monrezo-mvp; Copy-Item -Recurse build\web\* pages\monrezo-mvp; python -m http.server 8090 --directory pages
+```
+
+Publication automatique : `.github/workflows/web.yml` construit et publie sur GitHub Pages à
+chaque poussée sur la branche principale, après `flutter analyze` et `flutter test` — rien ne se
+publie si les tests échouent. Une seule chose à faire dans le dépôt : **Settings → Pages →
+Source = GitHub Actions**. Aucun secret n'est nécessaire.
+
+> **Publier rend le prototype public.** Les alertes trafic sont des exemples et l'achat est une
+> démonstration, mais une page publique peut être trouvée, citée et archivée. À décider avant,
+> pas après.
+
+Deux choses à savoir sur la version web :
+
+- le premier chargement pèse environ 31 Mo (le moteur de rendu de Flutter) ; les suivants sont
+  servis par le cache. Sur un téléphone en 4G, le premier affichage prend quelques secondes ;
+- le fonctionnement hors ligne y dépend du *service worker*, donc d'un premier chargement réussi.
+  Sur Android, l'APK est hors ligne dès l'installation : tout est embarqué.
+
+### Android (APK)
+
+```powershell
+flutter build apk --release
+```
+
+**Pas encore produit : il manque un JDK complet sur cette machine.** Le SDK Android est bien
+installé (plateformes 33 à 36, build-tools 35 et 36), mais aucun JDK ne l'accompagne. Trois
+obstacles rencontrés, dans l'ordre :
+
+1. **`JAVA_HOME` n'est pas défini** et aucun `java` n'est sur le PATH.
+2. **Gradle ne peut pas télécharger ses dépendances** : `PKIX path building failed` sur
+   `dl.google.com`. Le trafic HTTPS est inspecté par un antivirus ou un proxy dont l'autorité de
+   certification n'est pas connue de Java. Contournement sans rien installer ni modifier :
+   `$env:GRADLE_OPTS = "-Djavax.net.ssl.trustStoreType=Windows-ROOT"` — Java fait alors confiance
+   au magasin de certificats de Windows, celui que le navigateur utilise déjà. Vérifié : cela
+   débloque bien les téléchargements.
+3. **Le seul Java présent est celui d'IntelliJ** (`…\IntelliJ IDEA 2025.3.1.1\jbr`). Il a `javac`
+   mais **pas `jlink`**, dont le greffon Gradle d'Android a besoin pour construire l'image de
+   modules système. Le build s'arrête sur `jlink executable ... does not exist`.
+
+Il faut donc installer un JDK complet, une fois :
+
+```powershell
+winget install EclipseAdoptium.Temurin.21.JDK
+$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-21…"
+$env:GRADLE_OPTS = "-Djavax.net.ssl.trustStoreType=Windows-ROOT"
+flutter build apk --release
+```
+
+Installer Android Studio fait la même chose, en plus lourd, et règle au passage le
+`cmdline-tools component is missing` que signale `flutter doctor`.
+
+L'APK sera signé avec la clé de débogage par défaut de Flutter : suffisant pour faire essayer un
+prototype par un lien — le téléphone demandera d'autoriser une source inconnue — mais **à
+remplacer par une vraie clé** avant toute diffusion large.
+
+La position est déclarée dans `android/app/src/main/AndroidManifest.xml`
+(`ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION`) et n'est demandée qu'au moment où l'usager
+touche « Arrêts près de moi ».
+
 ## Quand la CUCM publie un nouveau GTFS
 
 Refaire l'étape 2, vérifier le résumé imprimé (8 lignes, période de validité), lancer `flutter test`,
