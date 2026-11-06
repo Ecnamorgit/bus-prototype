@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'data/alerts.dart';
 import 'data/network.dart';
 import 'data/schedule.dart';
 
@@ -92,7 +93,7 @@ class _ShellState extends State<Shell> {
     final pages = [
       DeparturesScreen(net: widget.net, sched: sched, favorites: favorites, onChanged: () => setState(() {})),
       LinesScreen(net: widget.net, sched: sched, favorites: favorites, onChanged: () => setState(() {})),
-      const PlaceholderScreen(title: 'Infos trafic', hint: 'Alertes par ligne (assets/data/alerts.json), étiquetées « exemple ».'),
+      AlertsScreen(net: widget.net),
       const PlaceholderScreen(title: 'Mes titres', hint: 'Parcours d’achat maquetté, QR factice, bandeau « démonstration ».'),
       const PlaceholderScreen(title: 'Plus', hint: 'Plan du réseau, boutiques, TAD, mentions.'),
     ];
@@ -338,13 +339,17 @@ class RouteBadge extends StatelessWidget {
       constraints: BoxConstraints(minWidth: 36 * size),
       height: 28 * size,
       padding: const EdgeInsets.symmetric(horizontal: 6),
-      alignment: Alignment.center,
-      decoration: BoxDecoration(color: _hex(route.color), borderRadius: BorderRadius.circular(8)),
-      child: Semantics(
+      decoration: BoxDecoration(color: hexColor(route.color), borderRadius: BorderRadius.circular(8)),
+      // Center(widthFactor: 1) plutôt que `alignment` : avec alignment, le badge s'étire sur
+      // toute la largeur disponible dès qu'il n'est pas dans une Row (cas du Wrap des alertes).
+      child: Center(
+        widthFactor: 1,
+        child: Semantics(
         label: 'ligne ${route.short}',
         excludeSemantics: true,
         child: Text(route.short,
-            style: TextStyle(color: _readableOn(_hex(route.color), _hex(route.textColor)), fontWeight: FontWeight.w900, fontSize: 14 * size)),
+            style: TextStyle(color: readableOn(hexColor(route.color), hexColor(route.textColor)), fontWeight: FontWeight.w900, fontSize: 14 * size)),
+        ),
       ),
     );
   }
@@ -566,7 +571,7 @@ class _RouteScreenState extends State<RouteScreen> {
                         everyTrip: ds.everyTrip,
                         isFirst: i == 0,
                         isLast: i == stops.length - 1,
-                        color: _onWhite(_hex(widget.route.color)),
+                        color: spineOn(hexColor(widget.route.color)),
                         favorite: widget.favorites.contains(ds.stop.id),
                         onToggleFavorite: () async {
                           await widget.favorites.toggle(ds.stop.id);
@@ -858,10 +863,11 @@ class _Banner extends StatelessWidget {
 
 /// État vide ou en erreur, plein écran.
 class _Notice extends StatelessWidget {
-  const _Notice({required this.icon, required this.title, required this.text});
+  const _Notice({required this.icon, required this.title, required this.text, this.action});
   final IconData icon;
   final String title;
   final String text;
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
@@ -876,11 +882,314 @@ class _Notice extends StatelessWidget {
             Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: kInk), textAlign: TextAlign.center),
             const SizedBox(height: 6),
             Text(text, textAlign: TextAlign.center, style: const TextStyle(color: Colors.black54)),
+            if (action != null) ...[const SizedBox(height: 18), action!],
           ],
         ),
       ),
     );
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Écran 3 : infos trafic (données d'exemple, étiquetées comme telles)
+// ---------------------------------------------------------------------------------------------
+
+class AlertsScreen extends StatefulWidget {
+  const AlertsScreen({super.key, required this.net, this.loader});
+  final Network net;
+
+  /// D'où viennent les alertes. Par défaut l'asset embarqué ; le jour où un back-office les
+  /// publie, c'est ici qu'on branche sa lecture — et c'est ce qui permet de tester à l'écran
+  /// les trois états (chargement, erreur, liste vide) sans toucher au fichier livré.
+  final Future<AlertFeed> Function()? loader;
+
+  @override
+  State<AlertsScreen> createState() => _AlertsScreenState();
+}
+
+class _AlertsScreenState extends State<AlertsScreen> {
+  // Chargé à part du réseau : demain ces alertes viendront d'un back-office, pas des assets.
+  late Future<AlertFeed> _feed = _load();
+
+  Future<AlertFeed> _load() => (widget.loader ?? AlertFeed.load)();
+
+  void _reload() {
+    // Corps explicite : une flèche renverrait le Future, et setState refuse une valeur asynchrone.
+    setState(() {
+      _feed = _load();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Infos trafic')),
+      body: FutureBuilder<AlertFeed>(
+        future: _feed,
+        builder: (context, snap) {
+          if (snap.hasError) {
+            return _Notice(
+              icon: Icons.cloud_off_outlined,
+              title: 'Informations indisponibles',
+              text: 'Les informations trafic n’ont pas pu être lues.\n${snap.error}',
+              action: FilledButton.icon(onPressed: _reload, icon: const Icon(Icons.refresh), label: const Text('Réessayer')),
+            );
+          }
+          if (!snap.hasData) {
+            return const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator()));
+          }
+          final feed = snap.data!;
+          final today = DateTime.now();
+          final current = feed.current(today);
+          final soon = feed.upcoming(today);
+
+          return Column(
+            children: [
+              if (feed.allExamples)
+                const _Banner(
+                  text: 'Démonstration : ces informations sont des exemples. Elles ne viennent pas du réseau.',
+                ),
+              Expanded(
+                child: current.isEmpty && soon.isEmpty
+                    ? const _Notice(
+                        icon: Icons.check_circle_outline,
+                        title: 'Aucune perturbation',
+                        text: 'Aucune information trafic aujourd’hui sur le réseau.',
+                      )
+                    : ListView(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+                        children: [
+                          if (current.isNotEmpty) ...[
+                            _SectionTitle(label: 'En cours', count: current.length),
+                            for (final a in current) _AlertCard(alert: a, net: widget.net, today: today),
+                          ],
+                          if (soon.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            _SectionTitle(label: 'À venir', count: soon.length),
+                            for (final a in soon) _AlertCard(alert: a, net: widget.net, today: today),
+                          ],
+                          const SizedBox(height: 10),
+                          const Text(
+                            'Les perturbations terminées disparaissent d’elles-mêmes de cette liste.',
+                            style: TextStyle(fontSize: 12, color: Colors.black54),
+                          ),
+                        ],
+                      ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({required this.label, required this.count});
+  final String label;
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8, top: 4),
+      child: Text('$label ($count)', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: kInk)),
+    );
+  }
+}
+
+class _AlertCard extends StatelessWidget {
+  const _AlertCard({required this.alert, required this.net, required this.today});
+  final TrafficAlert alert;
+  final Network net;
+  final DateTime today;
+
+  @override
+  Widget build(BuildContext context) {
+    final sev = _severityStyle(alert.severity);
+    return Card(
+      elevation: 0,
+      color: Colors.white,
+      margin: const EdgeInsets.only(bottom: 10),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFFE2E8F0))),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => showModalBottomSheet<void>(
+          context: context,
+          showDragHandle: true,
+          isScrollControlled: true,
+          builder: (_) => _AlertSheet(alert: alert, net: net, today: today),
+        ),
+        child: Semantics(
+          label: '${sev.label} : ${alert.title}',
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  margin: const EdgeInsets.only(top: 2),
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(color: sev.background, shape: BoxShape.circle),
+                  child: Icon(sev.icon, size: 20, color: sev.color),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(alert.title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: kInk)),
+                      const SizedBox(height: 3),
+                      Text(_periodLabel(alert, today), style: TextStyle(fontSize: 13, color: sev.color, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          ..._lineBadges(net, alert.lines),
+                          if (alert.example) const _ExampleTag(),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AlertSheet extends StatelessWidget {
+  const _AlertSheet({required this.alert, required this.net, required this.today});
+  final TrafficAlert alert;
+  final Network net;
+  final DateTime today;
+
+  @override
+  Widget build(BuildContext context) {
+    final sev = _severityStyle(alert.severity);
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.82),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(color: sev.background, shape: BoxShape.circle),
+                  child: Icon(sev.icon, size: 20, color: sev.color),
+                ),
+                const SizedBox(width: 12),
+                Expanded(child: Text(alert.title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 19, color: kInk))),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(_periodLabel(alert, today), style: TextStyle(fontSize: 14, color: sev.color, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                ..._lineBadges(net, alert.lines),
+                if (alert.example) const _ExampleTag(),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Text(alert.body, style: const TextStyle(fontSize: 15, height: 1.4)),
+            if (alert.updated != null) ...[
+              const SizedBox(height: 16),
+              Text('Mis à jour le ${_frDayMonth(alert.updated!)} à ${_hhmm(alert.updated!)}',
+                  style: const TextStyle(fontSize: 12, color: Colors.black54)),
+            ],
+            if (alert.example) ...[
+              const SizedBox(height: 14),
+              const Text(
+                'Information d’exemple, écrite pour la maquette. Un back-office de l’exploitant alimentera cette liste.',
+                style: TextStyle(fontSize: 12, color: Color(0xFF7A4800)),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Étiquette « exemple » : elle accompagne chaque donnée simulée, carte par carte.
+/// Le bandeau en haut de l'écran ne suffit pas — une capture d'une seule carte circulera.
+class _ExampleTag extends StatelessWidget {
+  const _ExampleTag();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        border: Border.all(color: const Color(0xFF9A5B00)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: const Text('exemple', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF9A5B00))),
+    );
+  }
+}
+
+/// Badges des lignes concernées. Une alerte désigne les lignes par leur nom public (« M2 ») :
+/// l'identifiant interne du GTFS est un compteur et ne survit pas à une régénération.
+List<Widget> _lineBadges(Network net, List<String> lines) {
+  if (lines.isEmpty) {
+    return [
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(color: const Color(0xFFEFF3F6), borderRadius: BorderRadius.circular(6)),
+        child: const Text('Tout le réseau', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: kInk)),
+      ),
+    ];
+  }
+  final out = <Widget>[];
+  for (final name in lines) {
+    final route = net.routes.where((r) => r.short.toUpperCase() == name.toUpperCase()).firstOrNull;
+    if (route != null) {
+      out.add(RouteBadge(route: route, size: 0.9));
+    } else {
+      // Ligne inconnue du GTFS embarqué : on l'affiche quand même plutôt que de la perdre.
+      out.add(Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(color: const Color(0xFFEFF3F6), borderRadius: BorderRadius.circular(6)),
+        child: Text(name, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: kInk)),
+      ));
+    }
+  }
+  return out;
+}
+
+({Color color, Color background, IconData icon, String label}) _severityStyle(AlertSeverity s) {
+  switch (s) {
+    case AlertSeverity.severe:
+      return (color: const Color(0xFFB3261E), background: const Color(0xFFFCE8E6), icon: Icons.report_outlined, label: 'Perturbation');
+    case AlertSeverity.warning:
+      return (color: const Color(0xFF9A5B00), background: const Color(0xFFFFF4E0), icon: Icons.warning_amber_rounded, label: 'Modification');
+    case AlertSeverity.info:
+      return (color: kInk, background: const Color(0xFFEFF3F6), icon: Icons.info_outline, label: 'Information');
+  }
+}
+
+String _periodLabel(TrafficAlert a, DateTime today) {
+  final from = a.from, to = a.to;
+  if (from != null && a.isUpcomingOn(today)) {
+    return to != null ? 'Du ${_frDayMonth(from)} au ${_frDayMonth(to)}' : 'À partir du ${_frDayMonth(from)}';
+  }
+  if (to != null) return 'Jusqu’au ${_frDayMonth(to)}';
+  return 'En cours';
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -915,35 +1224,39 @@ String _lineName(BusLine r) {
 }
 
 const _jours = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
-const _mois = ['janvier', 'fevrier', 'mars', 'avril', 'mai', 'juin', 'juillet', 'aout', 'septembre', 'octobre', 'novembre', 'decembre'];
+const _mois = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
 
-String _frDate(DateTime d) => '${_jours[d.weekday - 1]} ${d.day} ${_mois[d.month - 1]}';
+String _frDate(DateTime d) => '${_jours[d.weekday - 1]} ${_frDayMonth(d)}';
+
+String _frDayMonth(DateTime d) => '${d.day == 1 ? '1er' : d.day} ${_mois[d.month - 1]}';
 
 /// Couleur de texte lisible sur un fond : la valeur declaree si elle passe le contraste AA
 /// (4,5:1), sinon le noir ou le blanc, selon ce que le fond supporte.
-Color _readableOn(Color background, Color declared) {
-  if (_contrast(background, declared) >= 4.5) return declared;
-  return _contrast(background, Colors.black) >= _contrast(background, Colors.white) ? Colors.black : Colors.white;
+Color readableOn(Color background, Color declared) {
+  if (contrastRatio(background, declared) >= 4.5) return declared;
+  return contrastRatio(background, Colors.black) >= contrastRatio(background, Colors.white) ? Colors.black : Colors.white;
 }
 
 /// Couleur de ligne assombrie juste assez pour rester visible sur fond blanc.
 /// Le jaune de la navette TGV (#FFEE00) disparaît sinon : un trait que personne ne voit
 /// n'est pas un repère. On garde la teinte, on baisse la luminosité.
-Color _onWhite(Color c) {
+Color spineOn(Color c) {
   var out = c;
-  for (var i = 0; i < 20 && _contrast(out, Colors.white) < 2.5; i++) {
+  for (var i = 0; i < 20 && contrastRatio(out, Colors.white) < 2.5; i++) {
     out = Color.fromARGB(255, (out.r * 255 * 0.88).round(), (out.g * 255 * 0.88).round(), (out.b * 255 * 0.88).round());
   }
   return out;
 }
 
-double _contrast(Color a, Color b) {
+double contrastRatio(Color a, Color b) {
   final la = a.computeLuminance(), lb = b.computeLuminance();
   final hi = la > lb ? la : lb, lo = la > lb ? lb : la;
   return (hi + 0.05) / (lo + 0.05);
 }
 
-Color _hex(String h) {
+/// Convertit « #RRGGBB » en couleur. Public : les tests vérifient le contraste des badges
+/// sur les vraies couleurs du réseau.
+Color hexColor(String h) {
   final v = int.tryParse(h.replaceFirst('#', ''), radix: 16) ?? 0x0F2A4F;
   return Color(0xFF000000 | v);
 }

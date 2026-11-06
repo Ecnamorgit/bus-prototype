@@ -92,6 +92,47 @@ Sans dépendance, sur un GTFS fabriqué en mémoire (le vrai zip n'est pas commi
 fusion des quais, la séparation des homonymes lointains, et la stabilité des identifiants quand le
 GTFS est remanié.
 
+## Format des informations trafic
+
+`assets/data/alerts.json` contient aujourd'hui des **exemples**, écrits pour la maquette. Le format
+est prévu pour qu'un back-office de l'exploitant le produise tel quel :
+
+```json
+{
+  "_note": "...",
+  "alerts": [
+    {
+      "id": "a-schneider-2026-11",
+      "severity": "severe",          // info | warning | severe
+      "lines": ["C1", "C2"],         // noms publics des lignes ; [] = tout le réseau
+      "title": "Place Schneider non desservie",
+      "body": "Texte complet affiché au détail.",
+      "from": "2026-11-02",          // null = depuis toujours
+      "to": "2026-11-14",            // null = sans fin annoncée ; jour inclus
+      "updated": "2026-11-05T17:40",
+      "example": true                // true = donnée simulée, étiquetée à l'écran
+    }
+  ]
+}
+```
+
+Trois décisions qui tiendront quand les données deviendront réelles :
+
+- **Les lignes sont désignées par leur nom public** (`M2`), jamais par l'identifiant interne du GTFS
+  (`R5`) : cet identifiant est un compteur attribué à la conversion, il se décale dès qu'une ligne
+  est ajoutée. Un flux écrit par un exploitant doit survivre à une régénération des données.
+- **`example` est l'interrupteur.** Tant qu'il vaut `true`, l'écran affiche un bandeau de
+  démonstration et une étiquette « exemple » sur chaque carte — le bandeau seul ne suffit pas, c'est
+  une carte isolée qui circulera en capture d'écran. Le jour où un back-office publie de vraies
+  alertes, l'étiquette disparaît sans toucher au code. Une alerte sans le champ est traitée comme un
+  exemple : on préfère étiqueter à tort que présenter un exemple comme vrai.
+- **Un flux abîmé ne vide pas l'écran** : une entrée illisible est ignorée, une gravité inconnue
+  devient une simple information, une date illisible est oubliée. Seul un fichier sans champ
+  `alerts` est une erreur — et elle s'affiche, avec un bouton « Réessayer ».
+
+Les perturbations terminées disparaissent d'elles-mêmes : le filtrage se fait à l'affichage, sur la
+date du téléphone.
+
 ## Quand la CUCM publie un nouveau GTFS
 
 Refaire l'étape 2, vérifier le résumé imprimé (8 lignes, période de validité), lancer `flutter test`,

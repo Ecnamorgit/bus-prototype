@@ -1,8 +1,71 @@
 {
-  "_note": "Exemples fictifs pour la maquette. Format prévu pour un futur back-office exploitant.",
+  "_note": "Exemples fictifs pour la maquette. Format prévu pour un futur back-office exploitant : voir README.md, section « Format des informations trafic ». Les lignes sont désignées par leur nom public (M2), pas par l'identifiant interne du GTFS.",
   "alerts": [
-    {"id": "a1", "severity": "warning", "lines": ["M2"], "title": "Travaux rue de la République", "body": "Arrêt Hôtel de Ville non desservi jusqu'au 20 novembre. Report à l'arrêt Mairie.", "from": "2026-11-04", "to": "2026-11-20", "example": true},
-    {"id": "a2", "severity": "info", "lines": ["TGV"], "title": "Correspondances TGV garanties", "body": "Chaque arrivée et départ de TGV est desservi ; en cas de retard du train, la navette attend.", "from": "2026-11-01", "to": null, "example": true},
-    {"id": "a3", "severity": "info", "lines": [], "title": "Horaires d'hiver", "body": "Les horaires d'hiver s'appliquent à partir du 1er décembre.", "from": "2026-11-15", "to": "2026-12-01", "example": true}
+    {
+      "id": "a-schneider-2026-11",
+      "severity": "severe",
+      "lines": ["C1", "C2", "C3", "TGV"],
+      "title": "Place Schneider non desservie",
+      "body": "Travaux de voirie place Schneider jusqu'au samedi 14 novembre. Les bus sont déviés et ne marquent pas l'arrêt. Descendez à Le Creusot Gare ou à Hôtel Dieu, à cinq minutes à pied.",
+      "from": "2026-11-02",
+      "to": "2026-11-14",
+      "updated": "2026-11-05T17:40",
+      "example": true
+    },
+    {
+      "id": "a-gautherets-2026-11",
+      "severity": "warning",
+      "lines": ["M1", "M3"],
+      "title": "Les Gautherets : arrêt provisoire",
+      "body": "Jusqu'à samedi inclus, l'arrêt Les Gautherets est reporté cent mètres plus loin, devant le centre social. Les horaires ne changent pas.",
+      "from": "2026-11-06",
+      "to": "2026-11-07",
+      "updated": "2026-11-06T06:30",
+      "example": true
+    },
+    {
+      "id": "a-navette-tgv",
+      "severity": "info",
+      "lines": ["TGV"],
+      "title": "Correspondances TGV garanties",
+      "body": "Chaque arrivée et chaque départ de TGV est desservi par la navette. En cas de retard du train, la navette attend les voyageurs.",
+      "from": "2026-09-28",
+      "to": null,
+      "updated": "2026-09-28T08:00",
+      "example": true
+    },
+    {
+      "id": "a-noel-quai-de-gaulle",
+      "severity": "warning",
+      "lines": ["M1", "M2", "M3", "M4", "TGV"],
+      "title": "Marché de Noël : Quai de Gaulle déplacé",
+      "body": "Du 12 au 24 décembre, l'arrêt Quai de Gaulle est reporté devant la gare routière, à cent cinquante mètres. Prévoyez deux à trois minutes de marche supplémentaires.",
+      "from": "2026-12-12",
+      "to": "2026-12-24",
+      "updated": "2026-11-03T09:15",
+      "example": true
+    },
+    {
+      "id": "a-horaires-hiver",
+      "severity": "info",
+      "lines": [],
+      "title": "Horaires d'hiver à partir du 1er décembre",
+      "body": "Les horaires d'hiver s'appliquent sur tout le réseau à partir du mardi 1er décembre. Les fiches horaires seront mises à jour dans l'application une semaine avant.",
+      "from": "2026-11-15",
+      "to": "2026-12-01",
+      "updated": "2026-11-02T14:00",
+      "example": true
+    },
+    {
+      "id": "a-coudraie-octobre",
+      "severity": "warning",
+      "lines": ["M3"],
+      "title": "Déviation rue de la Coudraie",
+      "body": "Travaux terminés le 30 octobre. Cette information est conservée pour montrer qu'une alerte passée disparaît toute seule de l'écran.",
+      "from": "2026-10-12",
+      "to": "2026-10-30",
+      "updated": "2026-10-30T18:00",
+      "example": true
+    }
   ]
 }
