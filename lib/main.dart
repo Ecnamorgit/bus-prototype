@@ -340,7 +340,12 @@ class RouteBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 6),
       alignment: Alignment.center,
       decoration: BoxDecoration(color: _hex(route.color), borderRadius: BorderRadius.circular(8)),
-      child: Text(route.short, style: TextStyle(color: _hex(route.textColor), fontWeight: FontWeight.w900, fontSize: 14 * size)),
+      child: Semantics(
+        label: 'ligne ${route.short}',
+        excludeSemantics: true,
+        child: Text(route.short,
+            style: TextStyle(color: _readableOn(_hex(route.color), _hex(route.textColor)), fontWeight: FontWeight.w900, fontSize: 14 * size)),
+      ),
     );
   }
 }
@@ -393,33 +398,94 @@ class LinesScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final today = DateTime.now();
     return Scaffold(
       appBar: AppBar(title: const Text('Lignes')),
-      body: ListView.separated(
-        padding: const EdgeInsets.all(16),
-        itemCount: net.routes.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 8),
-        itemBuilder: (context, i) {
-          final r = net.routes[i];
-          return Card(
-            elevation: 0,
-            color: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFFE2E8F0))),
-            child: ListTile(
-              leading: RouteBadge(route: r, size: 1.15),
-              title: Text(r.long.isEmpty ? 'Ligne ${r.short}' : r.long, style: const TextStyle(fontWeight: FontWeight.w700)),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => RouteScreen(net: net, sched: sched, route: r, favorites: favorites, onChanged: onChanged),
-              )),
+      body: net.routes.isEmpty
+          ? const _Notice(
+              icon: Icons.error_outline,
+              title: 'Aucune ligne',
+              text: 'Les données embarquées ne contiennent aucune ligne. Régénérez assets/data/network.json.',
+            )
+          : ListView.separated(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+              itemCount: net.routes.length + 1,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (context, i) {
+                if (i == net.routes.length) {
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 14),
+                    child: Text(
+                      'Horaires prévus du ${_frDate(today)}, données ouvertes de la collectivité. Pas de temps réel.',
+                      style: const TextStyle(fontSize: 12, color: Colors.black54),
+                    ),
+                  );
+                }
+                final r = net.routes[i];
+                final courses = sched.routeTripCount(r.id, today);
+                final nbStops = {
+                  for (final d in net.directionsOfRoute(r.id))
+                    for (final ds in net.directionStops(r.id, d)) ds.stop.id
+                }.length;
+                return _LineCard(
+                  route: r,
+                  title: _lineName(r),
+                  subtitle: courses == 0 ? 'Pas de bus aujourd’hui' : '$nbStops arrêts · $courses courses aujourd’hui',
+                  warn: courses == 0,
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => RouteScreen(net: net, sched: sched, route: r, favorites: favorites, onChanged: onChanged),
+                  )),
+                );
+              },
             ),
-          );
-        },
+    );
+  }
+}
+
+class _LineCard extends StatelessWidget {
+  const _LineCard({required this.route, required this.title, required this.subtitle, required this.warn, required this.onTap});
+  final BusLine route;
+  final String title;
+  final String subtitle;
+  final bool warn;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      color: Colors.white,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFFE2E8F0))),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+          child: Row(
+            children: [
+              RouteBadge(route: route, size: 1.15),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: kInk)),
+                    const SizedBox(height: 2),
+                    Text(subtitle, style: TextStyle(fontSize: 13, color: warn ? const Color(0xFF9A5B00) : Colors.black54)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: Colors.black38),
+            ],
+          ),
+        ),
       ),
     );
   }
 }
 
+/// Une ligne, un sens : les arrêts dans l'ordre, puis la grille horaire d'un arrêt.
 class RouteScreen extends StatefulWidget {
   const RouteScreen({super.key, required this.net, required this.sched, required this.route, required this.favorites, required this.onChanged});
   final Network net;
@@ -433,119 +499,385 @@ class RouteScreen extends StatefulWidget {
 }
 
 class _RouteScreenState extends State<RouteScreen> {
-  int direction = 0;
+  late int direction = widget.net.directionsOfRoute(widget.route.id).firstOrNull ?? 0;
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// En changeant de sens, on revient en haut : sinon l'usager retombe au milieu de la ligne,
+  /// à un arrêt qui n'a rien à voir avec celui qu'il regardait.
+  void _swap(List<int> dirs) {
+    setState(() => direction = dirs.firstWhere((d) => d != direction, orElse: () => direction));
+    if (_scroll.hasClients) _scroll.jumpTo(0);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final patterns = widget.net.patternsOfRoute(widget.route.id);
-    // Par sens, on garde le motif le plus long (les variantes courtes sont des sous-ensembles).
-    StopPattern? longest(int dir) {
-      StopPattern? best;
-      for (final p in patterns.where((p) => p.direction == dir)) {
-        if (best == null || p.stopIds.length > best.stopIds.length) best = p;
-      }
-      return best;
-    }
-
-    final p = longest(direction) ?? longest(1 - direction);
+    final net = widget.net;
+    final dirs = net.directionsOfRoute(widget.route.id);
+    final main = net.mainPatternOfDirection(widget.route.id, direction);
+    final stops = net.directionStops(widget.route.id, direction);
     final today = DateTime.now();
+    final courses = main == null ? 0 : widget.sched.directionTripCount(widget.route.id, direction, today);
+
     return Scaffold(
-      appBar: AppBar(title: Row(children: [RouteBadge(route: widget.route), const SizedBox(width: 10), Expanded(child: Text(widget.route.long, style: const TextStyle(fontSize: 16)))])),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: SegmentedButton<int>(
-              segments: [
-                ButtonSegment(value: 0, label: Text('vers ${longest(0)?.headsign ?? '—'}', overflow: TextOverflow.ellipsis)),
-                ButtonSegment(value: 1, label: Text('vers ${longest(1)?.headsign ?? '—'}', overflow: TextOverflow.ellipsis)),
+      appBar: AppBar(
+        title: Row(children: [
+          RouteBadge(route: widget.route),
+          const SizedBox(width: 10),
+          Expanded(child: Text(_lineName(widget.route), style: const TextStyle(fontSize: 16), overflow: TextOverflow.ellipsis)),
+        ]),
+      ),
+      body: main == null
+          ? const _Notice(
+              icon: Icons.schedule_outlined,
+              title: 'Aucun horaire',
+              text: 'Cette ligne n’a aucun parcours dans les données embarquées.',
+            )
+          : Column(
+              children: [
+                _DirectionHeader(
+                  headsign: main.headsign,
+                  canSwap: dirs.length > 1,
+                  onSwap: () => _swap(dirs),
+                ),
+                if (courses == 0)
+                  const _Banner(text: 'Aucun bus dans ce sens aujourd’hui. Les arrêts ci-dessous restent le tracé de la ligne.'),
+                Expanded(
+                  child: ListView.builder(
+                    controller: _scroll,
+                    padding: const EdgeInsets.fromLTRB(12, 6, 8, 28),
+                    itemCount: stops.length + 1,
+                    itemBuilder: (context, i) {
+                      if (i == stops.length) {
+                        return const Padding(
+                          padding: EdgeInsets.fromLTRB(10, 16, 10, 0),
+                          child: Text('Touchez un arrêt pour voir tous les horaires du jour dans ce sens.',
+                              style: TextStyle(fontSize: 12, color: Colors.black54)),
+                        );
+                      }
+                      final ds = stops[i];
+                      return _StopRow(
+                        stop: ds.stop,
+                        everyTrip: ds.everyTrip,
+                        isFirst: i == 0,
+                        isLast: i == stops.length - 1,
+                        color: _onWhite(_hex(widget.route.color)),
+                        favorite: widget.favorites.contains(ds.stop.id),
+                        onToggleFavorite: () async {
+                          await widget.favorites.toggle(ds.stop.id);
+                          widget.onChanged();
+                          if (mounted) setState(() {});
+                        },
+                        onTap: () => showModalBottomSheet<void>(
+                          context: context,
+                          showDragHandle: true,
+                          isScrollControlled: true,
+                          builder: (_) => TimetableSheet(
+                            sched: widget.sched,
+                            route: widget.route,
+                            direction: direction,
+                            headsign: main.headsign,
+                            stop: ds.stop,
+                            everyTrip: ds.everyTrip,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
               ],
-              selected: {direction},
-              onSelectionChanged: (s) => setState(() => direction = s.first),
+            ),
+    );
+  }
+}
+
+/// Le sens courant, avec le bouton pour passer à l'autre. Pas de bouton segmenté : à 1,6×,
+/// « vers LE BREUIL CENTRE COMMERCIAL » ne tient pas sur la largeur d'un téléphone.
+class _DirectionHeader extends StatelessWidget {
+  const _DirectionHeader({required this.headsign, required this.canSwap, required this.onSwap});
+  final String headsign;
+  final bool canSwap;
+  final VoidCallback onSwap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+      child: Row(
+        children: [
+          const Icon(Icons.arrow_forward, color: kTeal),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Direction', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                Text(headsign, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: kInk)),
+              ],
             ),
           ),
-          if (p == null)
-            const Expanded(child: Center(child: Text('Aucun horaire pour cette ligne.')))
-          else ...[
-            if (widget.sched.tripCount(p.id, today) == 0)
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
-                child: Text('Pas de service aujourd’hui sur ce sens.', style: TextStyle(color: Colors.black54)),
-              ),
-            Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                itemCount: p.stopIds.length,
-                itemBuilder: (context, i) {
-                  final s = widget.net.stopById[p.stopIds[i]]!;
-                  final fav = widget.favorites.contains(s.id);
-                  return ListTile(
-                    dense: true,
-                    leading: Icon(i == 0 || i == p.stopIds.length - 1 ? Icons.radio_button_checked : Icons.radio_button_off, size: 18, color: _hex(widget.route.color)),
-                    title: Text(s.name),
-                    trailing: IconButton(
-                      tooltip: fav ? 'Retirer des favoris' : 'Ajouter aux favoris',
-                      icon: Icon(fav ? Icons.star : Icons.star_border, color: fav ? const Color(0xFFFFB300) : null),
-                      onPressed: () async {
-                        await widget.favorites.toggle(s.id);
-                        widget.onChanged();
-                        setState(() {});
-                      },
-                    ),
-                    onTap: () => showModalBottomSheet<void>(
-                      context: context,
-                      showDragHandle: true,
-                      builder: (_) => TimetableSheet(sched: widget.sched, pattern: p, stop: s, route: widget.route),
-                    ),
-                  );
-                },
-              ),
+          if (canSwap)
+            IconButton.filledTonal(
+              tooltip: 'Changer de sens',
+              onPressed: onSwap,
+              icon: const Icon(Icons.swap_horiz),
             ),
-          ],
         ],
       ),
     );
   }
 }
 
-/// Grille horaire du jour d'un sens à un arrêt.
-class TimetableSheet extends StatelessWidget {
-  const TimetableSheet({super.key, required this.sched, required this.pattern, required this.stop, required this.route});
-  final Schedule sched;
-  final StopPattern pattern;
+class _StopRow extends StatelessWidget {
+  const _StopRow({
+    required this.stop,
+    required this.everyTrip,
+    required this.isFirst,
+    required this.isLast,
+    required this.color,
+    required this.favorite,
+    required this.onToggleFavorite,
+    required this.onTap,
+  });
   final Stop stop;
+  final bool everyTrip;
+  final bool isFirst;
+  final bool isLast;
+  final Color color;
+  final bool favorite;
+  final VoidCallback onToggleFavorite;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(
+          stop.name,
+          style: TextStyle(fontSize: 15, color: kInk, fontWeight: isFirst || isLast ? FontWeight.w800 : FontWeight.w500),
+        ),
+        if (!everyTrip) const Text('Certains bus seulement', style: TextStyle(fontSize: 12, color: Color(0xFF9A5B00))),
+      ],
+    );
+    // IntrinsicHeight : le jalon doit faire la hauteur exacte de la rangée, qui dépend de la
+    // taille de texte choisie par l'usager (jusqu'à 1,6×) et du sous-titre de variante.
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                width: 28,
+                child: CustomPaint(painter: _TimelinePainter(color: color, isFirst: isFirst, isLast: isLast, hollow: !everyTrip)),
+              ),
+              Expanded(child: Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: label)),
+              IconButton(
+                tooltip: favorite ? 'Retirer des favoris' : 'Ajouter aux favoris',
+                onPressed: onToggleFavorite,
+                icon: Icon(favorite ? Icons.star : Icons.star_border, color: favorite ? const Color(0xFFFFB300) : Colors.black38),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TimelinePainter extends CustomPainter {
+  _TimelinePainter({required this.color, required this.isFirst, required this.isLast, required this.hollow});
+  final Color color;
+  final bool isFirst;
+  final bool isLast;
+  final bool hollow;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final x = size.width / 2;
+    final cy = size.height / 2;
+    final line = Paint()
+      ..color = color
+      ..strokeWidth = 4
+      ..strokeCap = StrokeCap.round;
+    if (!isFirst) canvas.drawLine(Offset(x, 0), Offset(x, cy), line);
+    if (!isLast) canvas.drawLine(Offset(x, cy), Offset(x, size.height), line);
+    final r = isFirst || isLast ? 7.0 : 5.0;
+    canvas.drawCircle(Offset(x, cy), r, Paint()..color = color);
+    if (hollow || !(isFirst || isLast)) {
+      canvas.drawCircle(Offset(x, cy), r - 2.5, Paint()..color = Colors.white);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_TimelinePainter old) =>
+      old.color != color || old.isFirst != isFirst || old.isLast != isLast || old.hollow != hollow;
+}
+
+/// Grille horaire du jour à un arrêt, pour un sens entier : toutes les variantes de la ligne.
+class TimetableSheet extends StatelessWidget {
+  const TimetableSheet({
+    super.key,
+    required this.sched,
+    required this.route,
+    required this.direction,
+    required this.headsign,
+    required this.stop,
+    required this.everyTrip,
+  });
+  final Schedule sched;
   final BusLine route;
+  final int direction;
+  final String headsign;
+  final Stop stop;
+  final bool everyTrip;
 
   @override
   Widget build(BuildContext context) {
     final today = DateTime.now();
-    final times = sched.timetable(pattern.id, stop.id, today);
+    final deps = sched.directionTimetable(route.id, direction, stop.id, today);
     final nowMin = today.hour * 60 + today.minute;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+    final next = deps.where((d) => d.minutes >= nowMin).map((d) => d.minutes).firstOrNull;
+
+    // Les variantes d'un même sens n'ont pas toujours la même destination (HOPITAL J. BOUVERI
+    // ou LES GAUTHERETS sur M3) : on sépare les groupes plutôt que de mélanger les heures.
+    final byHead = <String, List<DirectionDeparture>>{};
+    for (final d in deps) {
+      (byHead[d.headsign] ??= <DirectionDeparture>[]).add(d);
+    }
+    final heads = byHead.keys.toList()..sort((a, b) => byHead[b]!.length.compareTo(byHead[a]!.length));
+
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.82),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              RouteBadge(route: route),
+              const SizedBox(width: 10),
+              Expanded(child: Text(stop.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: kInk))),
+            ]),
+            const SizedBox(height: 6),
+            Text('Direction $headsign · ${_frDate(today)}', style: const TextStyle(fontSize: 13, color: Colors.black54)),
+            const SizedBox(height: 10),
+            Row(children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: const Color(0xFFEFF3F6), borderRadius: BorderRadius.circular(6)),
+                child: const Text('horaires prévus', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: kInk)),
+              ),
+              const SizedBox(width: 8),
+              const Expanded(child: Text('aucun temps réel', style: TextStyle(fontSize: 12, color: Colors.black54))),
+            ]),
+            if (!everyTrip) ...[
+              const SizedBox(height: 10),
+              const Text('Tous les bus de ce sens ne desservent pas cet arrêt.',
+                  style: TextStyle(fontSize: 13, color: Color(0xFF9A5B00))),
+            ],
+            const SizedBox(height: 14),
+            if (deps.isEmpty)
+              const Text('Pas de passage aujourd’hui à cet arrêt dans ce sens.', style: TextStyle(fontSize: 15))
+            else
+              for (final h in heads) ...[
+                if (heads.length > 1)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text('vers $h  (${byHead[h]!.length})',
+                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: kInk)),
+                  ),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final d in byHead[h]!)
+                      Semantics(
+                        label: 'passage prévu à ${formatMinutes(d.minutes)}${d.minutes == next ? ', prochain' : ''}',
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: d.minutes == next ? kTeal : const Color(0xFFEFF3F6),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            formatMinutes(d.minutes),
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 15,
+                              color: d.minutes == next ? Colors.white : kInk,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+              ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Bandeau d'information (pas de service, donnée simulée…).
+class _Banner extends StatelessWidget {
+  const _Banner({required this.text});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      color: const Color(0xFFFFF4E0),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [RouteBadge(route: route), const SizedBox(width: 10), Expanded(child: Text('${stop.name} → ${pattern.headsign}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)))]),
-          const SizedBox(height: 4),
-          Text('Aujourd’hui · horaires prévus', style: const TextStyle(color: Colors.black54, fontSize: 13)),
-          const SizedBox(height: 12),
-          if (times.isEmpty) const Text('Pas de passage aujourd’hui.'),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final t in times)
-                Chip(
-                  label: Text(formatMinutes(t)),
-                  backgroundColor: t >= nowMin && t < nowMin + 60 ? kTeal : null,
-                  labelStyle: TextStyle(color: t >= nowMin && t < nowMin + 60 ? Colors.white : null, fontWeight: FontWeight.w700),
-                  side: BorderSide.none,
-                ),
-            ],
-          ),
+          const Icon(Icons.info_outline, size: 18, color: Color(0xFF9A5B00)),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: const TextStyle(fontSize: 13, color: Color(0xFF7A4800)))),
         ],
+      ),
+    );
+  }
+}
+
+/// État vide ou en erreur, plein écran.
+class _Notice extends StatelessWidget {
+  const _Notice({required this.icon, required this.title, required this.text});
+  final IconData icon;
+  final String title;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 56, color: kInk),
+            const SizedBox(height: 14),
+            Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: kInk), textAlign: TextAlign.center),
+            const SizedBox(height: 6),
+            Text(text, textAlign: TextAlign.center, style: const TextStyle(color: Colors.black54)),
+          ],
+        ),
       ),
     );
   }
@@ -575,6 +907,41 @@ class PlaceholderScreen extends StatelessWidget {
 }
 
 String _hhmm(DateTime d) => '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+
+/// Nom de ligne lisible : le GTFS ecrit « Le Creusot < > Torcy ».
+String _lineName(BusLine r) {
+  final long = r.long.replaceAll(RegExp(r'\s*<\s*>\s*'), ' \u2194 ').trim();
+  return long.isEmpty ? 'Ligne ${r.short}' : long;
+}
+
+const _jours = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
+const _mois = ['janvier', 'fevrier', 'mars', 'avril', 'mai', 'juin', 'juillet', 'aout', 'septembre', 'octobre', 'novembre', 'decembre'];
+
+String _frDate(DateTime d) => '${_jours[d.weekday - 1]} ${d.day} ${_mois[d.month - 1]}';
+
+/// Couleur de texte lisible sur un fond : la valeur declaree si elle passe le contraste AA
+/// (4,5:1), sinon le noir ou le blanc, selon ce que le fond supporte.
+Color _readableOn(Color background, Color declared) {
+  if (_contrast(background, declared) >= 4.5) return declared;
+  return _contrast(background, Colors.black) >= _contrast(background, Colors.white) ? Colors.black : Colors.white;
+}
+
+/// Couleur de ligne assombrie juste assez pour rester visible sur fond blanc.
+/// Le jaune de la navette TGV (#FFEE00) disparaît sinon : un trait que personne ne voit
+/// n'est pas un repère. On garde la teinte, on baisse la luminosité.
+Color _onWhite(Color c) {
+  var out = c;
+  for (var i = 0; i < 20 && _contrast(out, Colors.white) < 2.5; i++) {
+    out = Color.fromARGB(255, (out.r * 255 * 0.88).round(), (out.g * 255 * 0.88).round(), (out.b * 255 * 0.88).round());
+  }
+  return out;
+}
+
+double _contrast(Color a, Color b) {
+  final la = a.computeLuminance(), lb = b.computeLuminance();
+  final hi = la > lb ? la : lb, lo = la > lb ? lb : la;
+  return (hi + 0.05) / (lo + 0.05);
+}
 
 Color _hex(String h) {
   final v = int.tryParse(h.replaceFirst('#', ''), radix: 16) ?? 0x0F2A4F;

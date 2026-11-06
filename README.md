@@ -60,6 +60,28 @@ lieux distincts partagent un code (GARE TGV ARRIVEE et DEPART), le code de quai 
 Un favori enregistré sous un ancien identifiant ne correspond plus à rien : l'application l'ignore
 (elle n'affiche jamais un autre arrêt à la place).
 
+### Une ligne a plusieurs parcours par sens
+
+Le GTFS décrit 29 motifs pour 8 lignes : chaque sens a sa variante principale et des variantes
+marginales (un détour, un service partiel, parfois une autre destination). La navette TGV en a
+trois dans le même sens, de 2 à 30 courses par jour. L'écran Lignes en tient compte :
+
+- le sens est nommé par la variante qui porte le plus de courses (`Network.mainPatternOfDirection`),
+  pas par la plus longue — la plus longue, sur la navette TGV, circule deux fois par jour ;
+- la liste d'arrêts fusionne les variantes (`Network.directionStops`) : les 22 arrêts du réseau
+  desservis par une seule variante (PROMENADE DU MIDI sur C1) sont affichés et marqués
+  « Certains bus seulement » ;
+- la grille horaire d'un arrêt réunit toutes les variantes du sens (`Schedule.directionTimetable`)
+  et porte la destination de chaque course : à CORIOLIS, 32 passages vers trois destinations là où
+  une seule variante en montrerait 13.
+
+### Contraste des badges de ligne
+
+Les couleurs de texte déclarées dans le GTFS échouent le contraste AA sur 5 lignes sur 8 (C3 :
+blanc sur cyan, 2,37 pour 4,5 exigés). `_readableOn` garde la couleur de l'exploitant et choisit
+le noir ou le blanc. Le jalon vertical de l'écran Lignes reprend la couleur de la ligne, assombrie
+quand elle disparaît sur fond blanc (le jaune de la navette TGV).
+
 ### Tests du convertisseur
 
 ```powershell
