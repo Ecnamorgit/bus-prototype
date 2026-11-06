@@ -19,6 +19,20 @@ const _json = '''
 }
 ''';
 
+// Mini-réseau en boucle : la course repasse par le même arrêt (cas réel de CORIOLIS sur la navette TGV).
+const _jsonBoucle = '''
+{
+ "network": {"name":"Test boucle","generated":"2026-11-06","valid_from":"20260101","valid_to":"20261231","source":""},
+ "stops": [{"id":"S1","name":"Gare","lat":46.80,"lon":4.42},
+           {"id":"S2","name":"Coriolis","lat":46.81,"lon":4.43},
+           {"id":"S3","name":"Zone","lat":46.82,"lon":4.44}],
+ "routes": [{"id":"R1","short":"TGV","long":"Navette","color":"#F2E700","text":"#000000"}],
+ "services": {"TLJ": {"days":[1,1,1,1,1,1,1],"start":"20260101","end":"20261231","add":[],"remove":[]}},
+ "patterns": [{"id":"PB","route":"R1","direction":0,"headsign":"Gare","stops":["S1","S2","S3","S2","S1"]}],
+ "trips": [{"pattern":"PB","service":"TLJ","times":[600,605,612,619,625]}]
+}
+''';
+
 void main() {
   final net = Network.fromJsonString(_json);
   final sched = Schedule(net);
@@ -93,5 +107,94 @@ void main() {
   test('formatMinutes gère les heures après minuit', () {
     expect(formatMinutes(1510), '01:10');
     expect(formatMinutes(480), '08:00');
+  });
+  group('motif en boucle', () {
+    final netB = Network.fromJsonString(_jsonBoucle);
+    final schedB = Schedule(netB);
+    final matin = DateTime(2026, 11, 10, 9, 0);
+
+    test('un arrêt desservi deux fois donne ses deux passages', () {
+      final d = schedB.nextDepartures('S2', matin);
+      expect(d.map((x) => formatMinutes(x.minutesSinceMidnight)).toList(), ['10:05', '10:19']);
+    });
+
+    test('au départ de la boucle, le retour au terminus n’est pas un départ', () {
+      final d = schedB.nextDepartures('S1', matin);
+      expect(d.map((x) => formatMinutes(x.minutesSinceMidnight)).toList(), ['10:00']);
+    });
+
+    test('la grille horaire liste les deux passages', () {
+      expect(schedB.timetable('PB', 'S2', DateTime(2026, 11, 10)), [605, 619]);
+    });
+  });
+
+  // Ligne à variantes : une course sur quatre fait un détour par la Zone et affiche une autre
+  // destination. Cas réel de M3 (HOPITAL J. BOUVERI / LES GAUTHERETS) et de la navette TGV.
+  group('ligne à variantes', () {
+    const jsonVar = '''
+{
+ "network": {"name":"Test variantes","generated":"2026-11-06","valid_from":"20260101","valid_to":"20261231","source":""},
+ "stops": [{"id":"S1","name":"Gare","lat":46.80,"lon":4.42},
+           {"id":"S2","name":"Mairie","lat":46.81,"lon":4.43},
+           {"id":"S3","name":"Hôpital","lat":46.82,"lon":4.44},
+           {"id":"S4","name":"Zone","lat":46.83,"lon":4.45}],
+ "routes": [{"id":"L1","short":"M9","long":"Gare - Hôpital","color":"#2E4694","text":"#FFFFFF"}],
+ "services": {"TLJ": {"days":[1,1,1,1,1,1,1],"start":"20260101","end":"20261231","add":[],"remove":[]}},
+ "patterns": [{"id":"PA","route":"L1","direction":0,"headsign":"Hôpital","stops":["S1","S2","S3"]},
+              {"id":"PB","route":"L1","direction":0,"headsign":"Hôpital via Zone","stops":["S1","S2","S4","S3"]},
+              {"id":"PC","route":"L1","direction":1,"headsign":"Gare","stops":["S3","S2","S1"]}],
+ "trips": [{"pattern":"PA","service":"TLJ","times":[480,485,492]},
+           {"pattern":"PA","service":"TLJ","times":[510,515,522]},
+           {"pattern":"PA","service":"TLJ","times":[540,545,552]},
+           {"pattern":"PB","service":"TLJ","times":[495,500,505,512]},
+           {"pattern":"PC","service":"TLJ","times":[600,607,612]}]
+}
+''';
+    final netV = Network.fromJsonString(jsonVar);
+    final schedV = Schedule(netV);
+    final jour = DateTime(2026, 11, 10);
+
+    test('le sens est nommé par la variante la plus fréquentée, pas la plus longue', () {
+      // PB dessert 4 arrêts contre 3, mais ne porte qu'une course sur quatre.
+      expect(netV.mainPatternOfDirection('L1', 0)?.id, 'PA');
+      expect(netV.mainPatternOfDirection('L1', 0)?.headsign, 'Hôpital');
+    });
+
+    test('les arrêts d’un sens fusionnent les variantes, dans l’ordre', () {
+      final ds = netV.directionStops('L1', 0);
+      expect(ds.map((d) => d.stop.name).toList(), ['Gare', 'Mairie', 'Zone', 'Hôpital']);
+    });
+
+    test('un arrêt desservi par une seule variante est signalé', () {
+      final ds = netV.directionStops('L1', 0);
+      expect({for (final d in ds) d.stop.name: d.everyTrip},
+          {'Gare': true, 'Mairie': true, 'Zone': false, 'Hôpital': true});
+    });
+
+    test('la grille d’un sens réunit toutes les variantes, triées', () {
+      final t = schedV.directionTimetable('L1', 0, 'S2', jour);
+      expect(t.map((x) => formatMinutes(x.minutes)).toList(), ['08:05', '08:20', '08:35', '09:05']);
+      expect(t.map((x) => x.headsign).toList(), ['Hôpital', 'Hôpital via Zone', 'Hôpital', 'Hôpital']);
+    });
+
+    test('un arrêt de détour n’a que les passages de sa variante', () {
+      final t = schedV.directionTimetable('L1', 0, 'S4', jour);
+      expect(t.map((x) => formatMinutes(x.minutes)).toList(), ['08:25']);
+    });
+
+    test('le terminus d’un sens n’apparaît pas comme départ', () {
+      expect(schedV.directionTimetable('L1', 0, 'S3', jour), isEmpty);
+    });
+
+    test('sens inconnu : vide, pas d’exception', () {
+      expect(netV.directionStops('L1', 7), isEmpty);
+      expect(netV.mainPatternOfDirection('L9', 0), isNull);
+      expect(schedV.directionTimetable('L1', 7, 'S1', jour), isEmpty);
+    });
+
+    test('nombre de courses du jour pour un sens', () {
+      expect(schedV.directionTripCount('L1', 0, jour), 4);
+      expect(schedV.directionTripCount('L1', 1, jour), 1);
+    });
   });
 }

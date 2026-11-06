@@ -107,7 +107,11 @@ class Network {
     required this.trips,
   })  : stopById = {for (final s in stops) s.id: s},
         routeById = {for (final r in routes) r.id: r},
-        patternById = {for (final p in patterns) p.id: p};
+        patternById = {for (final p in patterns) p.id: p},
+        tripCountByPattern = trips.fold(<String, int>{}, (m, t) {
+          m[t.patternId] = (m[t.patternId] ?? 0) + 1;
+          return m;
+        });
 
   final String name;
   final String generated;
@@ -123,6 +127,10 @@ class Network {
   final Map<String, Stop> stopById;
   final Map<String, BusLine> routeById;
   final Map<String, StopPattern> patternById;
+
+  /// Nombre de courses portées par chaque motif, toutes dates confondues.
+  /// Sert à distinguer la variante principale d'une ligne de ses variantes marginales.
+  final Map<String, int> tripCountByPattern;
 
   factory Network.fromJson(Map<String, dynamic> j) {
     final net = j['network'] as Map<String, dynamic>;
@@ -163,6 +171,78 @@ class Network {
     }
     return routes.where((r) => ids.contains(r.id)).toList();
   }
+
+  /// Motifs d'une ligne dans un sens, du plus fréquenté au moins fréquenté.
+  ///
+  /// Une ligne a presque toujours plusieurs variantes par sens : un détour aux heures creuses,
+  /// un service partiel, une destination différente. Les trier par nombre de courses évite
+  /// d'afficher une variante à deux courses par jour comme si elle était la ligne.
+  List<StopPattern> patternsOfDirection(String routeId, int direction) {
+    final list = patterns.where((p) => p.routeId == routeId && p.direction == direction).toList();
+    list.sort((a, b) {
+      final c = (tripCountByPattern[b.id] ?? 0).compareTo(tripCountByPattern[a.id] ?? 0);
+      return c != 0 ? c : a.id.compareTo(b.id); // ordre stable si egalite
+    });
+    return list;
+  }
+
+  /// La variante qui porte le plus de courses dans ce sens : celle qui nomme la destination.
+  StopPattern? mainPatternOfDirection(String routeId, int direction) {
+    final list = patternsOfDirection(routeId, direction);
+    return list.isEmpty ? null : list.first;
+  }
+
+  /// Les sens existants d'une ligne (0, 1), dans l'ordre.
+  List<int> directionsOfRoute(String routeId) {
+    final dirs = patterns.where((p) => p.routeId == routeId).map((p) => p.direction).toSet().toList();
+    dirs.sort();
+    return dirs;
+  }
+
+  /// Arrêts d'une ligne dans un sens, dans l'ordre du trajet, variantes fusionnées.
+  ///
+  /// L'ossature est la variante principale. Les arrêts que seules des variantes desservent
+  /// (22 sur le réseau, dont PROMENADE DU MIDI sur C1) sont insérés derrière leur prédécesseur
+  /// et marqués [DirectionStop.everyTrip] = false : les cacher reviendrait à mentir sur le tracé,
+  /// les mélanger reviendrait à promettre un arrêt que la plupart des bus ne font pas.
+  /// On n'insère que des arrêts nouveaux, jamais de réordonnancement : la navette TGV repasse
+  /// par le même arrêt dans une même course et ne se laisse pas trier.
+  List<DirectionStop> directionStops(String routeId, int direction) {
+    final variants = patternsOfDirection(routeId, direction);
+    if (variants.isEmpty) return const [];
+    final order = <String>[];
+    final seen = <String>{};
+    for (final id in variants.first.stopIds) {
+      if (seen.add(id)) order.add(id);
+    }
+    final core = Set<String>.from(seen);
+    for (final v in variants.skip(1)) {
+      var at = -1; // position du dernier arrêt déjà placé rencontré dans cette variante
+      for (final id in v.stopIds) {
+        final known = order.indexOf(id);
+        if (known >= 0) {
+          at = known;
+          continue;
+        }
+        at = at + 1;
+        order.insert(at, id);
+        seen.add(id);
+      }
+    }
+    return [
+      for (final id in order)
+        if (stopById[id] != null) DirectionStop(stop: stopById[id]!, everyTrip: core.contains(id)),
+    ];
+  }
+}
+
+/// Un arrêt dans la liste d'un sens de ligne.
+class DirectionStop {
+  const DirectionStop({required this.stop, required this.everyTrip});
+  final Stop stop;
+
+  /// false : seules certaines courses du sens desservent cet arrêt (variante, détour).
+  final bool everyTrip;
 }
 
 String yyyymmdd(DateTime d) =>

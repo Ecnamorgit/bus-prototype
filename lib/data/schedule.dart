@@ -27,6 +27,14 @@ class Departure {
   int minutesFrom(DateTime now) => scheduled.difference(now).inMinutes;
 }
 
+/// Un passage dans la grille horaire d'un sens de ligne, à un arrêt.
+class DirectionDeparture {
+  const DirectionDeparture({required this.minutes, required this.headsign, required this.patternId});
+  final int minutes; // depuis minuit du jour de service, > 1440 après minuit
+  final String headsign; // destination de cette course : elle varie d'une variante à l'autre
+  final String patternId;
+}
+
 class Schedule {
   Schedule(this.net);
   final Network net;
@@ -50,21 +58,23 @@ class Schedule {
         if (!active.contains(t.serviceId)) continue;
         final p = net.patternById[t.patternId];
         if (p == null) continue;
-        final idx = p.stopIds.indexOf(stopId);
-        if (idx < 0) continue;
-        final m = t.times[idx];
-        final at = serviceDay.add(Duration(minutes: m));
-        if (at.isBefore(now) || at.isAfter(horizon)) continue;
         final r = net.routeById[p.routeId];
         if (r == null) continue;
-        out.add(Departure(
-          route: r,
-          pattern: p,
-          stopId: stopId,
-          scheduled: at,
-          minutesSinceMidnight: m,
-          isLastStop: idx == p.stopIds.length - 1,
-        ));
+        // Un motif peut desservir deux fois le même arrêt (ligne en boucle) : tous les passages comptent.
+        for (var idx = 0; idx < p.stopIds.length; idx++) {
+          if (p.stopIds[idx] != stopId) continue;
+          final m = t.times[idx];
+          final at = serviceDay.add(Duration(minutes: m));
+          if (at.isBefore(now) || at.isAfter(horizon)) continue;
+          out.add(Departure(
+            route: r,
+            pattern: p,
+            stopId: stopId,
+            scheduled: at,
+            minutesSinceMidnight: m,
+            isLastStop: idx == p.stopIds.length - 1,
+          ));
+        }
       }
     }
 
@@ -79,15 +89,60 @@ class Schedule {
   List<int> timetable(String patternId, String stopId, DateTime date) {
     final p = net.patternById[patternId];
     if (p == null) return const [];
-    final idx = p.stopIds.indexOf(stopId);
-    if (idx < 0) return const [];
+    // Idem : un arrêt peut revenir plusieurs fois dans le motif.
+    final idxs = [for (var i = 0; i < p.stopIds.length; i++) if (p.stopIds[i] == stopId) i];
+    if (idxs.isEmpty) return const [];
     final active = servicesOn(DateTime(date.year, date.month, date.day));
     final times = <int>[];
     for (final t in net.trips) {
-      if (t.patternId == patternId && active.contains(t.serviceId)) times.add(t.times[idx]);
+      if (t.patternId != patternId || !active.contains(t.serviceId)) continue;
+      for (final i in idxs) {
+        times.add(t.times[i]);
+      }
     }
     times.sort();
     return times;
+  }
+
+  /// Grille horaire du jour à un arrêt pour un sens entier : toutes les variantes réunies.
+  ///
+  /// À CORIOLIS, la navette TGV a trois variantes dans le même sens ; n'en montrer qu'une
+  /// cache un bus sur six. Sur M3, les deux variantes n'ont même pas la même destination,
+  /// d'où la destination portée par chaque passage.
+  /// Le terminus d'une variante n'est pas un départ : on n'y monte pas.
+  List<DirectionDeparture> directionTimetable(String routeId, int direction, String stopId, DateTime date) {
+    final day = DateTime(date.year, date.month, date.day);
+    final active = servicesOn(day);
+    final out = <DirectionDeparture>[];
+    for (final p in net.patternsOfDirection(routeId, direction)) {
+      final idxs = [
+        for (var i = 0; i < p.stopIds.length - 1; i++)
+          if (p.stopIds[i] == stopId) i,
+      ];
+      if (idxs.isEmpty) continue;
+      for (final t in net.trips) {
+        if (t.patternId != p.id || !active.contains(t.serviceId)) continue;
+        for (final i in idxs) {
+          out.add(DirectionDeparture(minutes: t.times[i], headsign: p.headsign, patternId: p.id));
+        }
+      }
+    }
+    out.sort((a, b) => a.minutes.compareTo(b.minutes));
+    return out;
+  }
+
+  /// Nombre de courses d'un sens ce jour-là, toutes variantes : 0 = pas de bus aujourd'hui.
+  int directionTripCount(String routeId, int direction, DateTime date) {
+    final active = servicesOn(DateTime(date.year, date.month, date.day));
+    final ids = net.patternsOfDirection(routeId, direction).map((p) => p.id).toSet();
+    return net.trips.where((t) => ids.contains(t.patternId) && active.contains(t.serviceId)).length;
+  }
+
+  /// Nombre de courses d'une ligne ce jour-là, tous sens : 0 = la ligne ne circule pas.
+  int routeTripCount(String routeId, DateTime date) {
+    final active = servicesOn(DateTime(date.year, date.month, date.day));
+    final ids = net.patterns.where((p) => p.routeId == routeId).map((p) => p.id).toSet();
+    return net.trips.where((t) => ids.contains(t.patternId) && active.contains(t.serviceId)).length;
   }
 
   /// Nombre de courses d'un motif ce jour-là (0 = pas de service, utile pour afficher « pas de bus aujourd'hui »).
