@@ -258,43 +258,67 @@ Deux choses à savoir sur la version web :
 ### Android (APK)
 
 ```powershell
-flutter build apk --release
-```
-
-**Pas encore produit : il manque un JDK complet sur cette machine.** Le SDK Android est bien
-installé (plateformes 33 à 36, build-tools 35 et 36), mais aucun JDK ne l'accompagne. Trois
-obstacles rencontrés, dans l'ordre :
-
-1. **`JAVA_HOME` n'est pas défini** et aucun `java` n'est sur le PATH.
-2. **Gradle ne peut pas télécharger ses dépendances** : `PKIX path building failed` sur
-   `dl.google.com`. Le trafic HTTPS est inspecté par un antivirus ou un proxy dont l'autorité de
-   certification n'est pas connue de Java. Contournement sans rien installer ni modifier :
-   `$env:GRADLE_OPTS = "-Djavax.net.ssl.trustStoreType=Windows-ROOT"` — Java fait alors confiance
-   au magasin de certificats de Windows, celui que le navigateur utilise déjà. Vérifié : cela
-   débloque bien les téléchargements.
-3. **Le seul Java présent est celui d'IntelliJ** (`…\IntelliJ IDEA 2025.3.1.1\jbr`). Il a `javac`
-   mais **pas `jlink`**, dont le greffon Gradle d'Android a besoin pour construire l'image de
-   modules système. Le build s'arrête sur `jlink executable ... does not exist`.
-
-Il faut donc installer un JDK complet, une fois :
-
-```powershell
-winget install EclipseAdoptium.Temurin.21.JDK
-$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-21…"
+$env:JAVA_HOME = "<un JDK 21 complet>"
 $env:GRADLE_OPTS = "-Djavax.net.ssl.trustStoreType=Windows-ROOT"
 flutter build apk --release
+# => build\app\outputs\flutter-apk\app-release.apk (46,2 Mo)
 ```
 
-Installer Android Studio fait la même chose, en plus lourd, et règle au passage le
-`cmdline-tools component is missing` que signale `flutter doctor`.
+**Produit et vérifié.** L'APK s'installe par simple lien : le téléphone demandera d'autoriser
+l'installation depuis une source inconnue, c'est normal pour une application hors magasin.
+Identifiant `fr.pluriface.bus_prototype`, nom affiché « Bus — prototype », Android 7 et plus
+(`minSdk` 24), trois architectures dans le même fichier (`arm64-v8a`, `armeabi-v7a`, `x86_64`) :
+un seul lien marche sur n'importe quel téléphone. C'est ce qui explique les 46,2 Mo ;
+`flutter build apk --split-per-abi` produit trois fichiers deux fois plus légers, au prix de devoir
+choisir le bon.
 
-L'APK sera signé avec la clé de débogage par défaut de Flutter : suffisant pour faire essayer un
-prototype par un lien — le téléphone demandera d'autoriser une source inconnue — mais **à
-remplacer par une vraie clé** avant toute diffusion large.
+Il est signé avec la clé de débogage par défaut de Flutter (`CN=Android Debug`, schéma v2) —
+suffisant pour faire essayer un prototype, **à remplacer par une vraie clé** avant toute diffusion
+large (`android/app/build.gradle.kts`, bloc `signingConfigs`). Une clé différente oblige à
+désinstaller avant de réinstaller.
 
-La position est déclarée dans `android/app/src/main/AndroidManifest.xml`
+#### Ce que l'application demande au téléphone
+
+Le manifeste compilé ne contient que deux permissions, et **pas `android.permission.INTERNET`** :
+
+```powershell
+aapt2 dump permissions build\app\outputs\flutter-apk\app-release.apk
+# uses-permission: android.permission.ACCESS_COARSE_LOCATION
+# uses-permission: android.permission.ACCESS_FINE_LOCATION
+```
+
+Sans cette permission, Android **empêche** l'application d'ouvrir une connexion réseau. « Aucune
+donnée envoyée nulle part » n'est donc pas une promesse à croire : c'est le système qui
+l'applique, et n'importe qui peut le vérifier sur l'APK en une commande. Les liens vers
+monrezo.org et les numéros de téléphone passent par une autre application (navigateur,
+téléphone), ce qui ne requiert rien. À garder en tête : le jour où l'on branche un vrai temps
+réel, cette ligne devra être ajoutée, et cet argument tombera.
+
+La position, elle, est déclarée dans `android/app/src/main/AndroidManifest.xml`
 (`ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION`) et n'est demandée qu'au moment où l'usager
 touche « Arrêts près de moi ».
+
+#### Les deux réglages de la ligne de commande ci-dessus
+
+Ils ne sont pas décoratifs : sans eux, le build échoue sur ce poste, et probablement sur un autre
+poste d'entreprise.
+
+1. **Il faut un JDK 21 *complet*.** Le Java fourni avec IntelliJ ne suffit pas : il a `javac` mais
+   **pas `jlink`**, dont le greffon Gradle d'Android a besoin pour construire l'image de modules
+   système (`jlink executable ... does not exist`). Installer Temurin 21 :
+   `winget install EclipseAdoptium.Temurin.21.JDK`. Sans droits administrateur, le même paquet
+   s'extrait à côté, sans rien écrire dans le registre :
+   `msiexec /a <le .msi> TARGETDIR=C:\chemin\jdk21 /qn` — `JAVA_HOME` pointe alors sur
+   `<…>\PFiles64\Eclipse Adoptium\jdk-21…-hotspot`. C'est ce qui a été fait ici.
+2. **Gradle n'arrive pas à télécharger ses dépendances** : `PKIX path building failed` sur
+   `dl.google.com`. Le trafic HTTPS est inspecté par un antivirus ou un proxy dont l'autorité de
+   certification n'est pas connue de Java. `-Djavax.net.ssl.trustStoreType=Windows-ROOT` fait
+   confiance au magasin de certificats de Windows, celui que le navigateur utilise déjà — rien
+   n'est installé ni modifié.
+
+Installer Android Studio règle les deux d'un coup, en plus lourd, et fait taire le
+`cmdline-tools component is missing` que signale `flutter doctor` (sans conséquence pour la
+compilation : c'est l'outil qui sert à installer des composants du SDK).
 
 ## Quand la CUCM publie un nouveau GTFS
 
