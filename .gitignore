@@ -14,3 +14,7 @@ data/gtfs/*.zip
 # Captures
 docs/captures/*.png
 !docs/captures/.gitkeep
+
+# Python (outils de conversion)
+__pycache__/
+*.pyc
