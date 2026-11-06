@@ -198,6 +198,30 @@ depuis Flutter. Repli prévu : si rien ne s'ouvre, le numéro part dans le press
 lisible en grand à l'écran. Les tests injectent l'ouverture et vérifient **ce qui serait composé**
 (`tel:+33385730110`) sans rien ouvrir.
 
+## Écran d'accueil : position et horaires prévus
+
+La position sert **uniquement** à trier les arrêts embarqués par distance. Elle n'est enregistrée
+nulle part, n'est envoyée nulle part, et n'est **jamais demandée toute seule** : l'usager appuie sur
+« Arrêts près de moi », et la raison est écrite à côté du bouton. Une demande de localisation qui
+surgit au lancement se fait refuser, et un refus définitif ne se rattrape que dans les réglages du
+téléphone.
+
+La géolocalisation a six états, pas deux — inactive, en recherche, accordée, refusée, refusée
+définitivement, service coupé — et chacun doit dire à l'usager **ce qu'il peut faire ensuite**.
+Ils sont isolés dans `lib/data/location.dart` derrière une fonction injectable
+(`LocationProbe`), ce qui permet de tous les passer en test, y compris ceux qu'on ne peut pas
+provoquer à la main. Les permissions Android sont déclarées dans `android/app/src/main/AndroidManifest.xml`.
+
+Un arrêt déjà en favori n'est pas reproposé dans « Autour de vous » : il est affiché juste au-dessus.
+
+Chaque carte d'arrêt porte le badge **« horaires prévus »**, et non une seule mention en bas de
+page : un horaire théorique présenté sans réserve se lit comme un temps réel, et il n'y a aucun
+temps réel sur ce réseau.
+
+Le titre de l'écran est « Prochains passages » et non le nom du réseau : le GTFS donne « CUCM »,
+l'acronyme de la collectivité, qui ne dit rien à un usager. Le nom venu des données reste affiché
+dans *Plan et infos*, avec la provenance des horaires.
+
 ## Quand la CUCM publie un nouveau GTFS
 
 Refaire l'étape 2, vérifier le résumé imprimé (8 lignes, période de validité), lancer `flutter test`,

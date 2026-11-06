@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'data/alerts.dart';
+import 'data/location.dart';
 import 'data/network.dart';
 import 'data/places.dart';
 import 'data/tickets.dart';
@@ -148,11 +149,23 @@ class Favorites {
 // ---------------------------------------------------------------------------------------------
 
 class DeparturesScreen extends StatefulWidget {
-  const DeparturesScreen({super.key, required this.net, required this.sched, required this.favorites, required this.onChanged});
+  const DeparturesScreen({
+    super.key,
+    required this.net,
+    required this.sched,
+    required this.favorites,
+    required this.onChanged,
+    this.probe,
+  });
   final Network net;
   final Schedule sched;
   final Favorites favorites;
   final VoidCallback onChanged;
+
+  /// Comment obtenir la position. Par défaut le capteur du téléphone ; injectable pour que
+  /// les tests passent les six états de la géolocalisation, dont ceux qu'on ne peut pas
+  /// provoquer à la main.
+  final LocationProbe? probe;
 
   @override
   State<DeparturesScreen> createState() => _DeparturesScreenState();
@@ -161,6 +174,8 @@ class DeparturesScreen extends StatefulWidget {
 class _DeparturesScreenState extends State<DeparturesScreen> {
   Timer? _tick;
   DateTime now = DateTime.now();
+  LocationResult _loc = LocationResult.idle;
+  List<(Stop, double)> _nearby = const [];
 
   @override
   void initState() {
@@ -182,16 +197,41 @@ class _DeparturesScreenState extends State<DeparturesScreen> {
     }
   }
 
+  /// La position n'est jamais demandée toute seule : un usager qui la voit surgir au lancement
+  /// refuse, et un refus définitif est difficile à rattraper.
+  Future<void> _locate() async {
+    setState(() => _loc = LocationResult.searching);
+    final r = await (widget.probe ?? deviceLocation)();
+    if (!mounted) return;
+    setState(() {
+      _loc = r;
+      _nearby = r.hasPosition ? widget.sched.nearestStops(r.lat!, r.lon!, limit: 3) : const [];
+    });
+  }
+
+  Future<void> _toggle(String id) async {
+    await widget.favorites.toggle(id);
+    widget.onChanged();
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final favs = widget.favorites.ids.map((id) => widget.net.stopById[id]).whereType<Stop>().toList();
+    final rienAMontrer = favs.isEmpty && _nearby.isEmpty;
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.net.name),
+        title: const Text('Prochains passages'),
         actions: [
           Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Center(child: Text(_hhmm(now), style: const TextStyle(fontWeight: FontWeight.w700))),
+            padding: const EdgeInsets.only(right: 14),
+            child: Center(
+              child: Semantics(
+                label: 'il est ${_hhmm(now)}',
+                child: Text(_hhmm(now), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+              ),
+            ),
           ),
         ],
       ),
@@ -200,59 +240,92 @@ class _DeparturesScreenState extends State<DeparturesScreen> {
         icon: const Icon(Icons.add_location_alt_outlined),
         label: const Text('Ajouter un arrêt'),
       ),
-      body: favs.isEmpty
-          ? _EmptyState(onAdd: _addStop)
-          : ListView.builder(
+      body: rienAMontrer
+          ? _EmptyState(onAdd: _addStop, onLocate: _locate, loc: _loc)
+          : ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
-              itemCount: favs.length + 1,
-              itemBuilder: (context, i) {
-                if (i == favs.length) {
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Text(
-                      'Horaires prévus (données ouvertes de la collectivité, ${widget.net.generated}). Pas de temps réel.',
-                      style: const TextStyle(fontSize: 12, color: Colors.black54),
-                    ),
-                  );
-                }
-                final s = favs[i];
-                final deps = widget.sched.nextDepartures(s.id, now, limit: 6);
-                return _StopCard(
-                  stop: s,
-                  departures: deps,
+              children: [
+                for (final s in favs)
+                  _StopCard(
+                    stop: s,
+                    departures: widget.sched.nextDepartures(s.id, now, limit: 6),
+                    now: now,
+                    isFavorite: true,
+                    onToggleFavorite: () => _toggle(s.id),
+                  ),
+                _NearbyBlock(
+                  loc: _loc,
+                  nearby: _nearby,
+                  sched: widget.sched,
                   now: now,
-                  onRemove: () async {
-                    await widget.favorites.toggle(s.id);
-                    widget.onChanged();
-                  },
-                );
-              },
+                  favorites: widget.favorites,
+                  onLocate: _locate,
+                  onToggleFavorite: _toggle,
+                  onSearch: _addStop,
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'Horaires prévus, issus des données ouvertes de la collectivité (${widget.net.generated}). '
+                  'Aucun temps réel n’existe sur ce réseau.',
+                  style: const TextStyle(fontSize: 12, color: Colors.black54),
+                ),
+              ],
             ),
     );
   }
 }
 
+/// Aucun favori et aucune position : les deux portes d'entrée, côte à côte.
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.onAdd});
+  const _EmptyState({required this.onAdd, required this.onLocate, required this.loc});
   final VoidCallback onAdd;
+  final VoidCallback onLocate;
+  final LocationResult loc;
 
   @override
   Widget build(BuildContext context) {
+    final chercher = OutlinedButton.icon(onPressed: onAdd, icon: const Icon(Icons.search), label: const Text('Chercher un arrêt'));
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(28),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(Icons.directions_bus_outlined, size: 64, color: kInk),
             const SizedBox(height: 16),
-            const Text('Vos arrêts, vos prochains bus', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: kInk), textAlign: TextAlign.center),
+            const Text('Vos arrêts, vos prochains bus',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: kInk), textAlign: TextAlign.center),
             const SizedBox(height: 8),
-            const Text('Ajoutez l’arrêt que vous prenez tous les jours : les prochains passages s’affichent ici, même sans réseau.',
-                textAlign: TextAlign.center, style: TextStyle(color: Colors.black54)),
-            const SizedBox(height: 20),
-            FilledButton.icon(onPressed: onAdd, icon: const Icon(Icons.search), label: const Text('Chercher un arrêt')),
-            // TODO(geoloc) : proposer les 3 arrêts les plus proches avec geolocator (Schedule.nearestStops).
+            const Text(
+              'Ajoutez l’arrêt que vous prenez tous les jours : les prochains passages s’affichent ici, même sans réseau.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.black54),
+            ),
+            const SizedBox(height: 22),
+            if (loc.status == LocationStatus.searching)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                    SizedBox(width: 10),
+                    Text('Recherche de votre position…'),
+                  ],
+                ),
+              )
+            else if (loc.canRetry)
+              FilledButton.icon(
+                onPressed: onLocate,
+                icon: const Icon(Icons.my_location),
+                label: Text(loc.status == LocationStatus.idle ? 'Arrêts près de moi' : 'Réessayer la position'),
+              ),
+            if (loc.status != LocationStatus.searching) ...[
+              const SizedBox(height: 10),
+              Text(loc.message, textAlign: TextAlign.center, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+            ],
+            const SizedBox(height: 14),
+            chercher,
           ],
         ),
       ),
@@ -260,12 +333,156 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
+/// « Autour de vous » : l'arrêt le plus proche avec ses départs, puis les deux suivants.
+class _NearbyBlock extends StatelessWidget {
+  const _NearbyBlock({
+    required this.loc,
+    required this.nearby,
+    required this.sched,
+    required this.now,
+    required this.favorites,
+    required this.onLocate,
+    required this.onToggleFavorite,
+    required this.onSearch,
+  });
+
+  final LocationResult loc;
+  final List<(Stop, double)> nearby;
+  final Schedule sched;
+  final DateTime now;
+  final Favorites favorites;
+  final VoidCallback onLocate;
+  final void Function(String stopId) onToggleFavorite;
+  final VoidCallback onSearch;
+
+  @override
+  Widget build(BuildContext context) {
+    final titre = Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 8),
+      child: Row(
+        children: [
+          const Icon(Icons.my_location, size: 18, color: kTeal),
+          const SizedBox(width: 8),
+          const Expanded(child: Text('Autour de vous', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: kInk))),
+          if (loc.status == LocationStatus.found)
+            TextButton(onPressed: onLocate, child: const Text('Actualiser')),
+        ],
+      ),
+    );
+
+    // Un arrêt déjà en favori est affiché juste au-dessus : le reproposer ici n'apprend rien.
+    final restants = nearby.where((e) => !favorites.contains(e.$1.id)).toList();
+
+    if (loc.status == LocationStatus.found && restants.isEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          titre,
+          const Text('Les arrêts autour de vous sont déjà dans vos favoris.',
+              style: TextStyle(fontSize: 13, color: Colors.black54)),
+        ],
+      );
+    }
+
+    if (loc.status == LocationStatus.found && restants.isNotEmpty) {
+      final (proche, distance) = restants.first;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          titre,
+          _StopCard(
+            stop: proche,
+            departures: sched.nextDepartures(proche.id, now, limit: 4),
+            now: now,
+            isFavorite: favorites.contains(proche.id),
+            onToggleFavorite: () => onToggleFavorite(proche.id),
+            distanceMeters: distance,
+            label: 'Le plus proche de vous',
+          ),
+          for (final (s, d) in restants.skip(1))
+            Card(
+              elevation: 0,
+              color: Colors.white,
+              margin: const EdgeInsets.only(bottom: 8),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14), side: const BorderSide(color: Color(0xFFE2E8F0))),
+              child: ListTile(
+                leading: const Icon(Icons.place_outlined, color: kTeal),
+                title: Text(s.name, style: const TextStyle(fontWeight: FontWeight.w600, color: kInk)),
+                subtitle: Text('${formatDistance(d)} · ${sched.net.routesAtStop(s.id).map((r) => r.short).join(' · ')}'),
+                trailing: IconButton(
+                  tooltip: favorites.contains(s.id) ? 'Retirer des favoris' : 'Ajouter aux favoris',
+                  icon: Icon(favorites.contains(s.id) ? Icons.star : Icons.star_border,
+                      color: favorites.contains(s.id) ? const Color(0xFFFFB300) : Colors.black38),
+                  onPressed: () => onToggleFavorite(s.id),
+                ),
+              ),
+            ),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        titre,
+        Card(
+          elevation: 0,
+          color: Colors.white,
+          margin: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFFE2E8F0))),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (loc.status == LocationStatus.searching)
+                  const Row(
+                    children: [
+                      SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                      SizedBox(width: 10),
+                      Expanded(child: Text('Recherche de votre position…')),
+                    ],
+                  )
+                else ...[
+                  Text(loc.message, style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                  const SizedBox(height: 12),
+                  if (loc.canRetry)
+                    FilledButton.tonalIcon(
+                      onPressed: onLocate,
+                      icon: const Icon(Icons.my_location),
+                      label: Text(loc.status == LocationStatus.idle ? 'Arrêts près de moi' : 'Réessayer'),
+                    )
+                  else
+                    OutlinedButton.icon(onPressed: onSearch, icon: const Icon(Icons.search), label: const Text('Chercher un arrêt')),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _StopCard extends StatelessWidget {
-  const _StopCard({required this.stop, required this.departures, required this.now, required this.onRemove});
+  const _StopCard({
+    required this.stop,
+    required this.departures,
+    required this.now,
+    required this.isFavorite,
+    required this.onToggleFavorite,
+    this.distanceMeters,
+    this.label,
+  });
+
   final Stop stop;
   final List<Departure> departures;
   final DateTime now;
-  final VoidCallback onRemove;
+  final bool isFavorite;
+  final VoidCallback onToggleFavorite;
+  final double? distanceMeters;
+  final String? label;
 
   @override
   Widget build(BuildContext context) {
@@ -279,21 +496,47 @@ class _StopCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (label != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 2),
+                child: Text(label!, style: const TextStyle(fontSize: 12, color: kTeal, fontWeight: FontWeight.w700)),
+              ),
             Row(
               children: [
                 const Icon(Icons.place, color: kTeal, size: 20),
                 const SizedBox(width: 6),
                 Expanded(child: Text(stop.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: kInk))),
                 IconButton(
-                  tooltip: 'Retirer des favoris',
-                  onPressed: onRemove,
-                  icon: const Icon(Icons.star, color: Color(0xFFFFB300)),
+                  tooltip: isFavorite ? 'Retirer des favoris' : 'Ajouter aux favoris',
+                  onPressed: onToggleFavorite,
+                  icon: Icon(isFavorite ? Icons.star : Icons.star_border,
+                      color: isFavorite ? const Color(0xFFFFB300) : Colors.black38),
                 ),
               ],
             ),
+            // Badge demandé par le brief : il accompagne chaque arrêt, pas seulement le bas de page.
+            // Un horaire théorique présenté sans réserve se lit comme un temps réel.
+            Padding(
+              padding: const EdgeInsets.only(left: 26, bottom: 6),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(color: const Color(0xFFEFF3F6), borderRadius: BorderRadius.circular(6)),
+                    child: const Text('horaires prévus',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: kInk)),
+                  ),
+                  if (distanceMeters != null)
+                    Text('à ${formatDistance(distanceMeters!)}', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                ],
+              ),
+            ),
             if (departures.isEmpty)
               const Padding(
-                padding: EdgeInsets.only(top: 4, bottom: 4),
+                padding: EdgeInsets.only(top: 2, bottom: 4),
                 child: Text('Pas de passage prévu dans les 3 prochaines heures.', style: TextStyle(color: Colors.black54)),
               ),
             for (final d in departures) _DepartureRow(d: d, now: now),
@@ -320,16 +563,23 @@ class _DepartureRow extends StatelessWidget {
           RouteBadge(route: d.route),
           const SizedBox(width: 10),
           Expanded(child: Text('vers ${d.headsign}', style: const TextStyle(fontSize: 14), overflow: TextOverflow.ellipsis)),
+          const SizedBox(width: 8),
+          // Le délai au-dessus de l'heure, et non à côté : à 1,6× de texte, les deux côte à côte
+          // débordent de la largeur d'un téléphone.
           Semantics(
             label: 'départ prévu à ${_hhmm(d.scheduled)}',
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(color: mins < 10 ? kTeal : const Color(0xFFEFF3F6), borderRadius: BorderRadius.circular(8)),
-              child: Text(label, style: TextStyle(fontWeight: FontWeight.w800, color: mins < 10 ? Colors.white : kInk)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(color: mins < 10 ? kTeal : const Color(0xFFEFF3F6), borderRadius: BorderRadius.circular(8)),
+                  child: Text(label, style: TextStyle(fontWeight: FontWeight.w800, color: mins < 10 ? Colors.white : kInk)),
+                ),
+                if (mins < 60) Text(_hhmm(d.scheduled), style: const TextStyle(fontSize: 12, color: Colors.black54)),
+              ],
             ),
           ),
-          const SizedBox(width: 8),
-          Text(_hhmm(d.scheduled), style: const TextStyle(fontSize: 12, color: Colors.black54)),
         ],
       ),
     );
@@ -1938,7 +2188,7 @@ class _PlacesScreenState extends State<PlacesScreen> {
               const SizedBox(height: 8),
               Text(
                 [
-                  'Horaires : données ouvertes de la collectivité, converties le ${widget.net.generated}, valables du ${_frAaaammjj(widget.net.validFrom)} au ${_frAaaammjj(widget.net.validTo)}.',
+                  'Horaires du réseau « ${widget.net.name} » : données ouvertes de la collectivité, converties le ${widget.net.generated}, valables du ${_frAaaammjj(widget.net.validFrom)} au ${_frAaaammjj(widget.net.validTo)}.',
                   if (info.source != null)
                     'Boutiques et transport à la demande : relevés le ${_frJjMmAaaa(info.fetched)} sur ${info.source}.',
                   'Tout est embarqué dans l’application : elle fonctionne sans réseau et n’envoie aucune donnée.',

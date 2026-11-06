@@ -9,6 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # Position de l'''usager, pour proposer l'''arrêt le plus proche (écran Prochains passages).
+  geolocator: ^13.0.0
   shared_preferences: ^2.2.0
   # Composer un numéro et ouvrir un lien officiel : l'écran Plan et infos porte le numéro du
   # transport à la demande et celui des boutiques. Recopier un numéro à la main, debout à un

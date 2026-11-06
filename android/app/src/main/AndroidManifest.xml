@@ -1,6 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Position : sert uniquement à proposer l'arrêt le plus proche parmi les arrêts
+         embarqués. Rien n'est enregistré, rien n'est envoyé. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <application
-        android:label="monrezo_mvp"
+        android:label="Bus — prototype"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
