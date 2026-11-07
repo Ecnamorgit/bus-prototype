@@ -251,8 +251,11 @@ Source = GitHub Actions**. Aucun secret n'est nécessaire.
 
 Deux choses à savoir sur la version web :
 
-- le premier chargement pèse environ 31 Mo (le moteur de rendu de Flutter) ; les suivants sont
-  servis par le cache. Sur un téléphone en 4G, le premier affichage prend quelques secondes ;
+- le premier chargement transfère environ **3,7 Mo** : le moteur de rendu de Flutter
+  (`canvaskit.wasm`, 2,9 Mo compressé) et le code de l'application (`main.dart.js`, 0,8 Mo). Les
+  chargements suivants sont servis par le cache. Sur un téléphone en 4G, le premier affichage
+  prend quelques secondes. À ne pas confondre avec les ~31 Mo du dossier `build/web` sur le
+  disque : c'est la taille non compressée, pas ce qui passe sur le réseau ;
 - le fonctionnement hors ligne y dépend du *service worker*, donc d'un premier chargement réussi.
   Sur Android, l'APK est hors ligne dès l'installation : tout est embarqué.
 
