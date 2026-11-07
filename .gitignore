@@ -20,3 +20,7 @@ docs/captures/*.png
 # Python (outils de conversion)
 __pycache__/
 *.pyc
+
+# Documents de travail internes : présents sur le poste, volontairement hors du dépôt.
+CLAUDE.md
+docs/dossier-projet.md

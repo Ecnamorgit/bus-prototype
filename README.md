@@ -1,7 +1,8 @@
 # monRéZO — prototype d'application voyageurs
 
 Prototype Flutter (Android + web) sur les horaires réels du réseau monRéZO, données ouvertes de la CUCM.
-Le brief complet et les règles de travail sont dans `CLAUDE.md` ; le dossier d'argumentation dans `docs/`.
+Tout est embarqué : l'application fonctionne sans réseau, et ne demande même pas la permission Internet
+— Android lui interdit donc d'envoyer quoi que ce soit.
 
 ## Démarrer
 
