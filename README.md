@@ -243,16 +243,17 @@ dans *Plan et infos*, avec la provenance des horaires.
 ### Web
 
 ```powershell
-flutter build web --release --base-href /monrezo-mvp/
+flutter build web --release --base-href /bus-prototype/
 ```
 
 `--base-href` doit valoir le chemin sous lequel le site est servi : GitHub Pages publie dans un
-sous-dossier qui porte le nom du dépôt. Le résultat est dans `build/web`, entièrement statique.
+sous-dossier qui porte le nom du dépôt. Le dépôt s’appelle `bus-prototype`, pas
+`monrezo-mvp` : c’est le nom du dépôt qui compte, et le workflow le lit tout seul. Le résultat est dans `build/web`, entièrement statique.
 
 Pour vérifier avant publication, servir le dossier **sous ce chemin** et non à la racine :
 
 ```powershell
-mkdir pages\monrezo-mvp; Copy-Item -Recurse build\web\* pages\monrezo-mvp; python -m http.server 8090 --directory pages
+mkdir pagesus-prototype; Copy-Item -Recurse build\web\* pagesus-prototype; python -m http.server 8090 --directory pages
 ```
 
 Publication automatique : `.github/workflows/web.yml` construit et publie sur GitHub Pages à
