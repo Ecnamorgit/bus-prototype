@@ -219,6 +219,14 @@ class _DeparturesScreenState extends State<DeparturesScreen> {
   Widget build(BuildContext context) {
     final favs = widget.favorites.ids.map((id) => widget.net.stopById[id]).whereType<Stop>().toList();
     final rienAMontrer = favs.isEmpty && _nearby.isEmpty;
+    final aujourdhui = DateTime(now.year, now.month, now.day);
+    // Le réseau ne roule ni le dimanche ni les jours fériés : une soixantaine de jours par
+    // an où « pas de passage dans les 3 prochaines heures » se lit comme une panne. Les
+    // jours normaux, reprise vaut null et rien ne change.
+    final reprise = widget.sched.runsOn(aujourdhui)
+        ? null
+        : widget.sched.nextServiceDay(DateTime(now.year, now.month, now.day + 1));
+    final aucuneReprise = !widget.sched.runsOn(aujourdhui) && reprise == null;
 
     return Scaffold(
       appBar: AppBar(
@@ -245,11 +253,29 @@ class _DeparturesScreenState extends State<DeparturesScreen> {
           : ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
               children: [
+                if (aucuneReprise)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 12),
+                    child: _Banner(
+                      text: 'Aucun bus aujourd’hui, ni dans les quinze jours qui viennent : '
+                          'les horaires embarqués ne couvrent plus cette période. '
+                          'L’application a besoin d’une mise à jour.',
+                    ),
+                  )
+                else if (reprise != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _Banner(
+                      text: 'Le réseau ne circule pas aujourd’hui, ${_frDate(aujourdhui)}. '
+                          'Reprise ${_frDate(reprise)} : ci-dessous, les premiers départs de ce jour-là.',
+                    ),
+                  ),
                 for (final s in favs)
                   _StopCard(
                     stop: s,
-                    departures: widget.sched.nextDepartures(s.id, now, limit: 6),
+                    departures: _aMontrer(widget.sched, s.id, now, reprise, limit: 6),
                     now: now,
+                    reprise: reprise,
                     isFavorite: true,
                     onToggleFavorite: () => _toggle(s.id),
                   ),
@@ -258,6 +284,7 @@ class _DeparturesScreenState extends State<DeparturesScreen> {
                   nearby: _nearby,
                   sched: widget.sched,
                   now: now,
+                  reprise: reprise,
                   favorites: widget.favorites,
                   onLocate: _locate,
                   onToggleFavorite: _toggle,
@@ -274,6 +301,14 @@ class _DeparturesScreenState extends State<DeparturesScreen> {
     );
   }
 }
+
+/// Les départs qu'une carte d'arrêt doit montrer : ceux qui viennent, ou — les jours où
+/// le réseau ne circule pas — les premiers du jour de reprise. [reprise] est null les
+/// jours normaux, et c'est le seul endroit où ce choix se fait.
+List<Departure> _aMontrer(Schedule sched, String stopId, DateTime now, DateTime? reprise, {required int limit}) =>
+    reprise == null
+        ? sched.nextDepartures(stopId, now, limit: limit)
+        : sched.firstDeparturesOfDay(stopId, reprise, limit: limit);
 
 /// Aucun favori et aucune position : les deux portes d'entrée, côte à côte.
 class _EmptyState extends StatelessWidget {
@@ -344,12 +379,16 @@ class _NearbyBlock extends StatelessWidget {
     required this.onLocate,
     required this.onToggleFavorite,
     required this.onSearch,
+    this.reprise,
   });
 
   final LocationResult loc;
   final List<(Stop, double)> nearby;
   final Schedule sched;
   final DateTime now;
+
+  /// Jour de reprise quand le réseau ne circule pas aujourd'hui ; null sinon.
+  final DateTime? reprise;
   final Favorites favorites;
   final VoidCallback onLocate;
   final void Function(String stopId) onToggleFavorite;
@@ -392,8 +431,9 @@ class _NearbyBlock extends StatelessWidget {
           titre,
           _StopCard(
             stop: proche,
-            departures: sched.nextDepartures(proche.id, now, limit: 4),
+            departures: _aMontrer(sched, proche.id, now, reprise, limit: 4),
             now: now,
+            reprise: reprise,
             isFavorite: favorites.contains(proche.id),
             onToggleFavorite: () => onToggleFavorite(proche.id),
             distanceMeters: distance,
@@ -474,11 +514,16 @@ class _StopCard extends StatelessWidget {
     required this.onToggleFavorite,
     this.distanceMeters,
     this.label,
+    this.reprise,
   });
 
   final Stop stop;
   final List<Departure> departures;
   final DateTime now;
+
+  /// Quand il est non nul, [departures] ne sont pas les prochains passages mais les
+  /// premiers du jour de reprise : la carte doit le dire, sinon elle ment sur l'heure.
+  final DateTime? reprise;
   final bool isFavorite;
   final VoidCallback onToggleFavorite;
   final double? distanceMeters;
@@ -534,10 +579,21 @@ class _StopCard extends StatelessWidget {
                 ],
               ),
             ),
+            if (reprise != null && departures.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 2, bottom: 4),
+                child: Text('Premiers départs ${_frDate(reprise!)}',
+                    style: const TextStyle(fontWeight: FontWeight.w700, color: kInk)),
+              ),
             if (departures.isEmpty)
-              const Padding(
-                padding: EdgeInsets.only(top: 2, bottom: 4),
-                child: Text('Pas de passage prévu dans les 3 prochaines heures.', style: TextStyle(color: Colors.black54)),
+              Padding(
+                padding: const EdgeInsets.only(top: 2, bottom: 4),
+                child: Text(
+                  reprise == null
+                      ? 'Pas de passage prévu dans les 3 prochaines heures.'
+                      : 'Pas de passage à cet arrêt ${_frDate(reprise!)}.',
+                  style: const TextStyle(color: Colors.black54),
+                ),
               ),
             for (final d in departures) _DepartureRow(d: d, now: now),
           ],

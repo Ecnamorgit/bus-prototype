@@ -219,6 +219,21 @@ Chaque carte d'arrêt porte le badge **« horaires prévus »**, et non une seul
 page : un horaire théorique présenté sans réserve se lit comme un temps réel, et il n'y a aucun
 temps réel sur ce réseau.
 
+### Les jours où le réseau ne circule pas
+
+Le réseau ne roule **ni le dimanche ni les jours fériés** : sur les données du 06/11/2026, le
+11 novembre et tous les dimanches n'ont aucun service. L'écran affichait alors, sur chaque arrêt,
+« Pas de passage prévu dans les 3 prochaines heures » — exact à la lettre, et illisible : on
+comprend que l'application n'a pas de données, pas qu'il n'y a pas de bus.
+
+L'accueil dit maintenant « Le réseau ne circule pas aujourd'hui, mercredi 11 novembre. Reprise
+jeudi 12 novembre » et montre les **premiers départs de ce jour-là** à chaque arrêt. Le calcul est
+dans `lib/data/schedule.dart` (`runsOn`, `nextServiceDay`, `firstDeparturesOfDay`), pas dans l'écran.
+
+Si aucun service n'est trouvé dans les quinze jours, le message change : ce ne sont plus des
+congés, ce sont les données qui ont expiré, et c'est ce que le bandeau annonce. Les deux cas ne se
+disent pas de la même façon, et aucun des deux ne se dit en laissant l'écran vide.
+
 Le titre de l'écran est « Prochains passages » et non le nom du réseau : le GTFS donne « CUCM »,
 l'acronyme de la collectivité, qui ne dit rien à un usager. Le nom venu des données reste affiché
 dans *Plan et infos*, avec la provenance des horaires.

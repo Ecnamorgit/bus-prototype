@@ -52,6 +52,35 @@ void main() {
     });
   });
 
+  // Le réseau réel ne circule ni le dimanche ni les jours fériés : une soixantaine de
+  // jours par an. Le jeu d'essai retire le 11 novembre et n'a pas de service le week-end,
+  // ce qui donne les deux cas sans rien inventer.
+  group('jours sans bus', () {
+    test('le 11 novembre, férié, le réseau ne circule pas', () {
+      expect(sched.runsOn(DateTime(2026, 11, 11)), isFalse);
+    });
+    test('un mardi ordinaire, si', () {
+      expect(sched.runsOn(DateTime(2026, 11, 10)), isTrue);
+    });
+    test('la reprise après le férié est le lendemain', () {
+      expect(sched.nextServiceDay(DateTime(2026, 11, 12)), DateTime(2026, 11, 12));
+    });
+    test('la reprise après un samedi saute le dimanche', () {
+      expect(sched.runsOn(DateTime(2026, 11, 14)), isFalse); // samedi
+      expect(sched.nextServiceDay(DateTime(2026, 11, 15)), DateTime(2026, 11, 16)); // lundi
+    });
+    test('hors de la période couverte, aucune reprise : ce ne sont plus des congés', () {
+      expect(sched.nextServiceDay(DateTime(2027, 6, 1)), isNull);
+    });
+    test('les premiers départs du jour de reprise partent de minuit, pas de maintenant', () {
+      final d = sched.firstDeparturesOfDay('S1', DateTime(2026, 11, 12));
+      expect(d.map((x) => formatMinutes(x.minutesSinceMidnight)).toList(), ['08:00', '08:30']);
+    });
+    test('un arrêt sans passage ce jour-là renvoie une liste vide, pas une erreur', () {
+      expect(sched.firstDeparturesOfDay('S404', DateTime(2026, 11, 12)), isEmpty);
+    });
+  });
+
   group('prochains départs', () {
     test('à la Gare à 7h50 un mardi : 08:00 puis 08:30, sens Hôpital', () {
       final d = sched.nextDepartures('S1', DateTime(2026, 11, 10, 7, 50));

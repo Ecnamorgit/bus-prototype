@@ -43,6 +43,35 @@ class Schedule {
   Set<String> servicesOn(DateTime date) =>
       net.services.entries.where((e) => e.value.activeOn(date)).map((e) => e.key).toSet();
 
+  /// Le réseau circule-t-il ce jour-là ? Aucun service actif = dimanche, jour férié, ou
+  /// date sortie de la période couverte par les données embarquées.
+  bool runsOn(DateTime date) => servicesOn(DateTime(date.year, date.month, date.day)).isNotEmpty;
+
+  /// Premier jour où le réseau circule, à partir de [from] inclus.
+  ///
+  /// Renvoie null si rien ne circule dans les [withinDays] jours qui suivent : ce n'est
+  /// alors plus « c'est dimanche », ce sont les données qui ont expiré, et les deux ne se
+  /// disent pas de la même façon à l'usager.
+  DateTime? nextServiceDay(DateTime from, {int withinDays = 14}) {
+    for (var i = 0; i <= withinDays; i++) {
+      // DateTime(y, m, j + i) normalise les fins de mois et reste juste aux changements
+      // d'heure, contrairement à une addition de Duration.
+      final day = DateTime(from.year, from.month, from.day + i);
+      if (runsOn(day)) return day;
+    }
+    return null;
+  }
+
+  /// Les premiers départs d'un arrêt sur une journée entière, à partir de minuit.
+  ///
+  /// Sert les jours où le réseau ne circule pas : plutôt qu'une carte vide, on montre
+  /// quand les bus reprennent. La fenêtre de 24 h couvre la journée complète ; les
+  /// courses de nuit de la veille qui débordent après minuit sont déjà gérées par
+  /// [nextDepartures].
+  List<Departure> firstDeparturesOfDay(String stopId, DateTime day, {int limit = 3}) =>
+      nextDepartures(stopId, DateTime(day.year, day.month, day.day),
+          limit: limit, window: const Duration(hours: 24));
+
   /// Prochains départs à un arrêt à partir de [now], toutes lignes, triés par heure.
   /// Tient compte des courses de la veille après minuit (minutes > 1440) et de celles du jour.
   List<Departure> nextDepartures(String stopId, DateTime now, {int limit = 10, Duration window = const Duration(hours: 3)}) {

@@ -42,6 +42,27 @@ String _reseauDuJour() {
 /// Position à environ 200 m au nord de la Gare Routière.
 Future<LocationResult> _positionProche() async => const LocationResult(LocationStatus.found, lat: 46.8018, lon: 4.42);
 
+/// Réseau dont le service existe tous les jours SAUF aujourd'hui : c'est exactement le
+/// dimanche et le jour férié du réseau réel. Les horaires sont fixes (08:00, 08:30) et non
+/// calés sur l'heure du test, puisqu'on affiche une journée entière depuis minuit.
+String _reseauSansBusAujourdhui() {
+  final d = DateTime.now();
+  final iso = '${d.year}${d.month.toString().padLeft(2, '0')}${d.day.toString().padLeft(2, '0')}';
+  return '''
+{
+ "network": {"name":"Test","generated":"2026-11-06","valid_from":"20200101","valid_to":"20301231","source":""},
+ "stops": [{"id":"S1","name":"Gare Routière","lat":46.80,"lon":4.42},
+           {"id":"S2","name":"Mairie","lat":46.8060,"lon":4.42},
+           {"id":"S3","name":"Hôpital","lat":46.8120,"lon":4.42}],
+ "routes": [{"id":"L1","short":"M9","long":"Gare - Hôpital","color":"#1CA23A","text":"#FFFFFF"}],
+ "services": {"TLJ": {"days":[1,1,1,1,1,1,1],"start":"20200101","end":"20301231","add":[],"remove":["$iso"]}},
+ "patterns": [{"id":"PA","route":"L1","direction":0,"headsign":"Hôpital","stops":["S1","S2","S3"]}],
+ "trips": [{"pattern":"PA","service":"TLJ","times":[480,483,487]},
+           {"pattern":"PA","service":"TLJ","times":[510,513,517]}]
+}
+''';
+}
+
 void main() {
   late Network net;
   late Schedule sched;
@@ -170,6 +191,51 @@ void main() {
       expect(find.textContaining('Recherche de votre position'), findsOneWidget);
       await tester.pumpAndSettle();
       expect(find.text('Le plus proche de vous'), findsOneWidget);
+    });
+  });
+
+  // Le 11 novembre, et tous les dimanches, le réseau ne circule pas. L'écran affichait
+  // alors « Pas de passage prévu dans les 3 prochaines heures » sur chaque arrêt : exact à
+  // la lettre, mais un décideur qui ouvre l'application ce jour-là lit une panne.
+  group('jour sans bus', () {
+    late Network mort;
+
+    Widget ecran({double textScale = 1.0}) => MaterialApp(
+          home: Builder(
+            builder: (context) => MediaQuery(
+              data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(textScale)),
+              child: DeparturesScreen(
+                net: mort,
+                sched: Schedule(mort),
+                favorites: favorites,
+                onChanged: () {},
+              ),
+            ),
+          ),
+        );
+
+    setUp(() => mort = Network.fromJsonString(_reseauSansBusAujourdhui()));
+
+    testWidgets('le dit, et montre les premiers départs du jour de reprise', (tester) async {
+      await favorites.toggle('S1');
+      await tester.pumpWidget(ecran());
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Le réseau ne circule pas aujourd’hui'), findsOneWidget);
+      expect(find.textContaining('Premiers départs'), findsOneWidget);
+      expect(find.text('08:00'), findsOneWidget);
+      expect(find.textContaining('Pas de passage prévu'), findsNothing);
+    });
+
+    testWidgets('texte à 1,6× sur 375 px : le bandeau ne déborde pas', (tester) async {
+      tester.view.physicalSize = const Size(375 * 3, 812 * 3);
+      tester.view.devicePixelRatio = 3;
+      addTearDown(tester.view.reset);
+
+      await favorites.toggle('S1');
+      await tester.pumpWidget(ecran(textScale: 1.6));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
     });
   });
 
