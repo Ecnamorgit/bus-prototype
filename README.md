@@ -284,7 +284,8 @@ flutter build apk --release
 # => build\app\outputs\flutter-apk\app-release.apk (46,2 Mo)
 ```
 
-**Produit et vérifié.** L'APK s'installe par simple lien : le téléphone demandera d'autoriser
+**Produit et vérifié** en version `0.2.0` (`versionCode` 2, et 2002 pour la variante arm64).
+L'APK s'installe par simple lien : le téléphone demandera d'autoriser
 l'installation depuis une source inconnue, c'est normal pour une application hors magasin.
 Identifiant `fr.pluriface.bus_prototype`, nom affiché « Bus — prototype », Android 7 et plus
 (`minSdk` 24), trois architectures dans le même fichier (`arm64-v8a`, `armeabi-v7a`, `x86_64`) :
@@ -315,9 +316,18 @@ Le manifeste compilé ne contient que deux permissions, et **pas `android.permis
 
 ```powershell
 aapt2 dump permissions build\app\outputs\flutter-apk\app-release.apk
-# uses-permission: android.permission.ACCESS_COARSE_LOCATION
-# uses-permission: android.permission.ACCESS_FINE_LOCATION
+# package: fr.pluriface.bus_prototype
+# uses-permission: name='android.permission.ACCESS_COARSE_LOCATION'
+# uses-permission: name='android.permission.ACCESS_FINE_LOCATION'
+# permission: fr.pluriface.bus_prototype.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+# uses-permission: name='fr.pluriface.bus_prototype.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION'
 ```
+
+La troisième est déclarée **par l'application, pour elle-même** : Flutter s'en sert pour qu'un
+`BroadcastReceiver` interne ne soit pas joignable par les autres applications. Elle commence par
+le nom du paquet, elle n'existe pas dans Android, et elle ne donne accès à rien. Elle est citée
+ici parce qu'elle sort de la commande : annoncer deux lignes et en afficher cinq suffirait à
+rendre tout l'argument suspect.
 
 Sans cette permission, Android **empêche** l'application d'ouvrir une connexion réseau. « Aucune
 donnée envoyée nulle part » n'est donc pas une promesse à croire : c'est le système qui
