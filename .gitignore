@@ -24,3 +24,5 @@ __pycache__/
 # Documents de travail internes : présents sur le poste, volontairement hors du dépôt.
 CLAUDE.md
 docs/dossier-projet.md
+docs/dossier-candidature.pdf
+docs/dossier-candidature.py
