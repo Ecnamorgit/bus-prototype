@@ -277,6 +277,10 @@ Deux choses à savoir sur la version web :
 
 ### Android (APK)
 
+Les fichiers construits sont publiés en release GitHub, avec leurs empreintes SHA-256 :
+https://github.com/Ecnamorgit/bus-prototype/releases — c’est le lien à envoyer, plutôt qu’une
+pièce jointe de 16,5 Mo. Pour en publier une nouvelle : `gh release create vX.Y.Z <les .apk>`.
+
 ```powershell
 $env:JAVA_HOME = "<un JDK 21 complet>"
 $env:GRADLE_OPTS = "-Djavax.net.ssl.trustStoreType=Windows-ROOT"
