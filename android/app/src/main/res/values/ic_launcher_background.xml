@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Blanc, comme les icones web : le marine de la marque disparaîtrait sur un
+         fond d'écran sombre, et la marque elle-même n'y serait plus lisible. -->
+    <color name="ic_launcher_background">#FFFFFF</color>
+</resources>

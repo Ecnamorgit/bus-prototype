@@ -1,7 +1,7 @@
 name: monrezo_mvp
 description: Prototype d'application voyageurs pour le réseau monRéZO (Pluriface).
 publish_to: "none"
-version: 0.2.0+2
+version: 0.2.1+3
 
 environment:
   sdk: ">=3.2.0 <4.0.0"

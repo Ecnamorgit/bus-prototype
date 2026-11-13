@@ -288,7 +288,7 @@ flutter build apk --release
 # => build\app\outputs\flutter-apk\app-release.apk (46,2 Mo)
 ```
 
-**Produit et vérifié** en version `0.2.0` (`versionCode` 2, et 2002 pour la variante arm64).
+**Produit et vérifié** en version `0.2.1` (`versionCode` 3, et 2003 pour la variante arm64).
 L'APK s'installe par simple lien : le téléphone demandera d'autoriser
 l'installation depuis une source inconnue, c'est normal pour une application hors magasin.
 Identifiant `fr.pluriface.bus_prototype`, nom affiché « Bus — prototype », Android 7 et plus
@@ -313,6 +313,23 @@ Il est signé avec la clé de débogage par défaut de Flutter (`CN=Android Debu
 suffisant pour faire essayer un prototype, **à remplacer par une vraie clé** avant toute diffusion
 large (`android/app/build.gradle.kts`, bloc `signingConfigs`). Une clé différente oblige à
 désinstaller avant de réinstaller.
+
+#### Les icônes de lancement
+
+`python tools/make_android_icons.py` les refabrique depuis `tools/logo-pluriface.png`, et
+`tools/make_web_icons.py` fait de même pour le web. Le gabarit Flutter livre son propre logo :
+dans un lanceur ou dans un onglet, il annonce l'outil, pas l'auteur.
+
+Android a deux systèmes d'icônes, et le gabarit n'en fournit qu'un. Jusqu'à Android 7 — notre
+`minSdk` est 24 — le lanceur affiche le PNG tel quel, donc l'icône porte sa propre forme. Depuis
+Android 8, il compose lui-même un fond et un avant-plan, puis découpe l'ensemble dans la forme
+choisie par le constructeur : cercle, carré arrondi ou goutte. Chaque couche mesure 108 dp mais
+seuls les **72 dp centraux** sont sûrs. D'où `mipmap-anydpi-v26/ic_launcher.xml`, les
+`ic_launcher_foreground.png` des cinq densités, et une marque à 44 % du côté pour qu'elle survive
+à n'importe quel découpage — vérifié en simulant les quatre formes.
+
+Le fond est blanc, et non le marine de la marque : sur un fond d'écran sombre un carré marine
+disparaîtrait, et la marque elle-même n'y serait plus lisible.
 
 #### Ce que l'application demande au téléphone
 
