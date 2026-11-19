@@ -238,6 +238,47 @@ Le titre de l'écran est « Prochains passages » et non le nom du réseau : le 
 l'acronyme de la collectivité, qui ne dit rien à un usager. Le nom venu des données reste affiché
 dans *Plan et infos*, avec la provenance des horaires.
 
+## Alarme d'arrivée : prévenir qu'on approche de son arrêt
+
+Savoir quand descendre est un problème quotidien pour qui ne voit pas défiler les arrêts :
+une personne malvoyante, quelqu'un qui ne connaît pas la ligne, un voyageur de nuit. Aucune
+application de réseau française ne le propose, et la nouvelle application officielle du réseau
+ne le liste pas non plus. L'idée vient des applications japonaises et coréennes, où c'est une
+catégorie à part entière.
+
+L'alarme prévient par **trois canaux à la fois** — vibration, son, annonce au lecteur d'écran —
+parce qu'aucun des trois n'est disponible pour tout le monde. L'annonce est `polite` à
+l'approche et `assertive` à l'arrivée : elle coupe la parole, ce qui est le but.
+
+Deux seuils : on prévient une première fois au **double** du rayon choisi, le temps de ranger
+ses affaires et de se lever, puis au rayon lui-même. Une phase ne se joue qu'une fois, sinon le
+téléphone vibre à chaque relevé de position.
+
+Faute de temps réel sur ce réseau, l'alarme se déclenche sur la **position** et non sur
+l'horaire. C'est plus robuste : un bus en retard ne la fait pas sonner trop tôt.
+
+### Les deux pièges, et comment ils sont traités
+
+Une alarme **armée alors qu'on est déjà devant l'arrêt** hurlerait à l'instant où on l'arme —
+c'est exactement ce que fait quelqu'un qui la règle en montant, à un arrêt qui est parfois le
+même. `WakeTracker` attend donc d'avoir vu l'usager hors de la zone d'approche avant de jouer
+quoi que ce soit, et l'écran le dit au lieu de rester muet sans qu'on sache pourquoi.
+
+L'**écran doit rester allumé** tant que l'alarme est armée : sinon Android suspend
+l'application et l'alarme ne sonne jamais. Une alarme qui ne réveille pas est pire que pas
+d'alarme. La seule autre voie est un service d'arrière-plan, qui exige
+`ACCESS_BACKGROUND_LOCATION` — une permission effrayante, et contraire à l'argument de cette
+application. C'est écrit à l'écran, pas caché. `wakelock_plus` passe par un attribut de
+fenêtre : **vérifié sur l'APK, il n'ajoute aucune permission**, pas même `WAKE_LOCK`.
+
+Le moteur est dans `lib/data/wake_alarm.dart` et ne connaît ni GPS, ni son, ni notification :
+seulement des distances. Il se teste sans téléphone (`test/wake_alarm_test.dart`), et l'écran
+se teste en déplaçant l'usager relevé après relevé (`test/wake_screen_test.dart`).
+
+L'action principale est **hors du défilement**, collée en bas : à 1,6× de texte sur 375 px elle
+passait sous la ligne de flottaison, et un bouton « Arrêter » qu'il faut aller chercher pendant
+que l'alarme sonne n'est pas un bouton.
+
 ## Installer et déployer
 
 ### Web

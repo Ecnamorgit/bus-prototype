@@ -16,6 +16,13 @@ dependencies:
   # transport à la demande et celui des boutiques. Recopier un numéro à la main, debout à un
   # arrêt, n'est pas une option. Repli prévu dans le code si l'ouverture échoue.
   url_launcher: ^6.3.0
+  # Alarme d'arrivee : l'ecran doit rester allume tant qu'elle est armee. Sans cela
+  # Android suspend l'application des que l'ecran s'eteint, et l'alarme ne sonne jamais —
+  # une alarme qui ne reveille pas est pire que pas d'alarme. La seule autre voie est un
+  # service d'arriere-plan, qui exige ACCESS_BACKGROUND_LOCATION : une permission
+  # effrayante, et contraire a l'argument « cette application ne demande presque rien ».
+  # wakelock_plus ne declare que WAKE_LOCK, permission normale, et aucun acces reseau.
+  wakelock_plus: ^1.6.1
 
 dev_dependencies:
   flutter_test:

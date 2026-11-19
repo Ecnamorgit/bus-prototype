@@ -8,7 +8,9 @@ import 'dart:math' as math;
 import 'dart:ui' show PointMode;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+import 'package:flutter/semantics.dart' show Assertiveness, SemanticsService;
+import 'package:flutter/services.dart' show Clipboard, ClipboardData, HapticFeedback, SystemSound, SystemSoundType;
+import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -17,6 +19,7 @@ import 'data/location.dart';
 import 'data/network.dart';
 import 'data/places.dart';
 import 'data/tickets.dart';
+import 'data/wake_alarm.dart';
 import 'data/schedule.dart';
 
 const kInk = Color(0xFF0F2A4F);
@@ -209,6 +212,15 @@ class _DeparturesScreenState extends State<DeparturesScreen> {
     });
   }
 
+  /// Choisir l'arrêt où l'on veut descendre, puis armer l'alarme.
+  Future<void> _reveil() async {
+    final stop = await showSearch<Stop?>(context: context, delegate: StopSearch(widget.sched));
+    if (stop == null || !mounted) return;
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => WakeScreen(stop: stop, probe: widget.probe),
+    ));
+  }
+
   Future<void> _toggle(String id) async {
     await widget.favorites.toggle(id);
     widget.onChanged();
@@ -232,6 +244,19 @@ class _DeparturesScreenState extends State<DeparturesScreen> {
       appBar: AppBar(
         title: const Text('Prochains passages'),
         actions: [
+          // Meme piege que l'etoile des favoris : le tooltip seul ne donne pas de nom
+          // au bouton dans l'arbre de semantique. test/semantics_test.dart l'a attrape.
+          Semantics(
+            container: true,
+            button: true,
+            label: 'Me réveiller à un arrêt',
+            excludeSemantics: true,
+            child: IconButton(
+              tooltip: 'Me réveiller à un arrêt',
+              onPressed: _reveil,
+              icon: const Icon(Icons.notifications_active_outlined),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 14),
             child: Center(
@@ -681,6 +706,254 @@ class _DepartureRow extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Alarme d'arrivée : prévenir qu'on approche de l'arrêt où l'on veut descendre
+// ---------------------------------------------------------------------------------------------
+
+/// Prévient par trois canaux à la fois — vibration, son, annonce au lecteur d'écran —
+/// parce qu'aucun des trois n'est disponible pour tout le monde. C'est la raison d'être
+/// de cet écran : savoir quand descendre est un problème quotidien pour qui ne voit pas
+/// défiler les arrêts.
+///
+/// La position est relevée toutes les [_periode] et ne quitte pas le téléphone. L'écran
+/// reste allumé tant que l'alarme est armée, faute de quoi le système suspend
+/// l'application et l'alarme ne sonne jamais : c'est écrit à l'écran, pas caché.
+class WakeScreen extends StatefulWidget {
+  const WakeScreen({super.key, required this.stop, this.probe});
+
+  final Stop stop;
+
+  /// Injectable : les tests passent les six états de la géolocalisation et déplacent
+  /// l'usager sans bouger de la pièce.
+  final LocationProbe? probe;
+
+  @override
+  State<WakeScreen> createState() => _WakeScreenState();
+}
+
+class _WakeScreenState extends State<WakeScreen> {
+  static const _periode = Duration(seconds: 5);
+  static const _rayons = <int>[200, 500, 1000];
+
+  int _rayon = 500;
+  late WakeTracker _tracker = WakeTracker(rayonMetres: _rayon.toDouble());
+  Timer? _tick;
+  LocationResult _loc = LocationResult.idle;
+  double? _distance;
+  WakePhase _phase = WakePhase.loin;
+  bool _armee = false;
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    _ecranAllume(false);
+    super.dispose();
+  }
+
+  /// Maintenir l'ecran allume passe par un canal natif. S'il manque — en test, ou sur une
+  /// plateforme qui ne le gere pas — l'alarme doit continuer sans, pas tomber.
+  Future<void> _ecranAllume(bool actif) async {
+    try {
+      await (actif ? WakelockPlus.enable() : WakelockPlus.disable());
+    } catch (_) {
+      // L'ecran s'eteindra peut-etre : c'est moins grave qu'une alarme qui plante.
+    }
+  }
+
+  Future<void> _armer() async {
+    setState(() {
+      _armee = true;
+      _loc = LocationResult.searching;
+      _tracker = WakeTracker(rayonMetres: _rayon.toDouble());
+      _phase = WakePhase.loin;
+      _distance = null;
+    });
+    // Sans unawaited, le premier releve attend la reponse d'un canal natif : l'ecran
+    // resterait vide une fraction de seconde pour rien.
+    unawaited(_ecranAllume(true));
+    await _releve();
+    _tick = Timer.periodic(_periode, (_) => _releve());
+  }
+
+  void _desarmer() {
+    _tick?.cancel();
+    _tick = null;
+    _ecranAllume(false);
+    setState(() {
+      _armee = false;
+      _phase = WakePhase.loin;
+      _distance = null;
+      _loc = LocationResult.idle;
+    });
+  }
+
+  Future<void> _releve() async {
+    final r = await (widget.probe ?? deviceLocation)();
+    if (!mounted) return;
+    if (!r.hasPosition) {
+      setState(() => _loc = r);
+      return;
+    }
+    final d = haversineMeters(r.lat!, r.lon!, widget.stop.lat, widget.stop.lon);
+    final nouvelle = _tracker.mesure(d);
+    setState(() {
+      _loc = r;
+      _distance = d;
+      _phase = _tracker.phase;
+    });
+    if (nouvelle != null && nouvelle != WakePhase.loin) _jouer(nouvelle);
+  }
+
+  /// Les trois canaux. Le lecteur d'écran d'abord : c'est lui qui sert à qui ne regarde pas.
+  void _jouer(WakePhase phase) {
+    final texte = WakeTracker.annonce(phase, widget.stop.name);
+    // Le lecteur d'ecran d'abord : c'est le canal de qui ne regarde pas l'ecran.
+    SemanticsService.sendAnnouncement(View.of(context), texte, Directionality.of(context),
+        assertiveness: phase == WakePhase.arrivee ? Assertiveness.assertive : Assertiveness.polite);
+    if (phase == WakePhase.arrivee) {
+      HapticFeedback.heavyImpact();
+      SystemSound.play(SystemSoundType.alert);
+    } else {
+      HapticFeedback.mediumImpact();
+      SystemSound.play(SystemSoundType.click);
+    }
+  }
+
+  Color get _fond {
+    if (_tracker.armeeSurPlace) return Colors.white;
+    switch (_phase) {
+      case WakePhase.loin:
+        return Colors.white;
+      case WakePhase.approche:
+        return const Color(0xFFFFF4E0);
+      case WakePhase.arrivee:
+        return kTeal;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final arrivee = _phase == WakePhase.arrivee && !_tracker.armeeSurPlace;
+    final surTexte = arrivee ? Colors.white : kInk;
+
+    return Scaffold(
+      backgroundColor: _fond,
+      appBar: AppBar(title: const Text('Me réveiller à un arrêt')),
+      // L'action principale est hors du defilement : a 1,6x de texte sur un petit ecran,
+      // elle passait sous la ligne de flottaison. Un bouton « Arreter » qu'il faut aller
+      // chercher pendant que l'alarme sonne n'est pas un bouton.
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 14),
+          child: SizedBox(
+            width: double.infinity,
+            child: _armee
+                ? OutlinedButton.icon(
+                    onPressed: _desarmer,
+                    icon: const Icon(Icons.stop_circle_outlined),
+                    label: const Text('Arrêter l’alarme'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      foregroundColor: surTexte,
+                      side: BorderSide(color: surTexte, width: 2),
+                    ),
+                  )
+                : FilledButton.icon(
+                    onPressed: _armer,
+                    icon: const Icon(Icons.notifications_active),
+                    label: const Text('Activer l’alarme'),
+                    style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+                  ),
+          ),
+        ),
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Descendre à', style: TextStyle(fontSize: 14, color: arrivee ? Colors.white70 : Colors.black54)),
+              const SizedBox(height: 4),
+              Text(widget.stop.name,
+                  style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: surTexte)),
+              const SizedBox(height: 20),
+
+              if (!_armee) ..._avantDepart() else ..._enRoute(surTexte),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _avantDepart() => [
+        const Text('À quelle distance faut-il vous prévenir ?',
+            style: TextStyle(fontWeight: FontWeight.w700, color: kInk)),
+        const SizedBox(height: 4),
+        const Text('Vous êtes prévenu une première fois au double de cette distance, '
+            'le temps de ranger vos affaires et de vous lever.',
+            style: TextStyle(fontSize: 13, color: Colors.black54)),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 10,
+          children: [
+            for (final r in _rayons)
+              ChoiceChip(
+                label: Text(formatDistance(r.toDouble())),
+                selected: _rayon == r,
+                onSelected: (_) => setState(() => _rayon = r),
+              ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        const _Banner(
+          text: 'L’alarme se déclenche sur votre position, pas sur l’horaire : un bus en retard '
+              'ne la fait pas sonner trop tôt. L’écran reste allumé tant qu’elle est active, '
+              'sinon le téléphone met l’application en veille et l’alarme ne sonne jamais. '
+              'Votre position ne quitte pas le téléphone.',
+        ),
+      ];
+
+  List<Widget> _enRoute(Color surTexte) {
+    // Armee alors qu'on est deja devant l'arret, l'alarme ne sonne pas : l'ecran ne doit
+    // pas crier « descendez ici » non plus, sinon il annonce une arrivee qui n'a pas eu lieu.
+    final arrivee = _phase == WakePhase.arrivee && !_tracker.armeeSurPlace;
+    return [
+      Semantics(
+        liveRegion: true,
+        label: WakeTracker.annonce(_phase, widget.stop.name),
+        excludeSemantics: true,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              arrivee
+                  ? 'DESCENDEZ ICI'
+                  : (_phase == WakePhase.approche ? 'Vous approchez' : 'Alarme active'),
+              style: TextStyle(fontSize: arrivee ? 34 : 22, fontWeight: FontWeight.w800, color: surTexte),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _distance == null
+                  ? (_loc.status == LocationStatus.searching ? 'Recherche de votre position…' : _loc.message)
+                  : 'encore ${formatDistance(_distance!)}',
+              style: TextStyle(fontSize: 18, color: arrivee ? Colors.white : Colors.black87),
+            ),
+          ],
+        ),
+      ),
+      if (_tracker.armeeSurPlace) ...[
+        const SizedBox(height: 14),
+        const _Banner(text: 'Vous êtes déjà à cet arrêt. L’alarme sonnera au prochain passage.'),
+      ],
+      const SizedBox(height: 20),
+      Text('Position relevée toutes les 5 secondes, sur le téléphone uniquement.',
+          style: TextStyle(fontSize: 12, color: arrivee ? Colors.white70 : Colors.black54)),
+    ];
   }
 }
 
