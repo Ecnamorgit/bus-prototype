@@ -329,7 +329,7 @@ flutter build apk --release
 # => build\app\outputs\flutter-apk\app-release.apk (46,2 Mo)
 ```
 
-**Produit et vérifié** en version `0.2.1` (`versionCode` 3, et 2003 pour la variante arm64).
+**Produit et vérifié** en version `0.2.2` (`versionCode` 4, et 2004 pour la variante arm64).
 L'APK s'installe par simple lien : le téléphone demandera d'autoriser
 l'installation depuis une source inconnue, c'est normal pour une application hors magasin.
 Identifiant `fr.pluriface.bus_prototype`, nom affiché « Bus — prototype », Android 7 et plus
