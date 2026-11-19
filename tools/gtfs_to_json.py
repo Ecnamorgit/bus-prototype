@@ -231,6 +231,7 @@ def main(src, dst, source_url=""):
     patterns = {}
     pattern_list = []
     trips = []
+    name_of_stop = {s["id"]: s["name"] for s in stops}
     for t in trips_raw:
         sts = sorted(st_by_trip.get(t["trip_id"], []), key=lambda x: int(x["stop_sequence"]))
         if len(sts) < 2 or t["route_id"] not in route_of:
@@ -239,7 +240,10 @@ def main(src, dst, source_url=""):
         if any(s is None for s in seq):
             continue
         direction = int((t.get("direction_id") or "0").strip() or 0)
-        headsign = (t.get("trip_headsign") or "").strip() or stops[int(seq[-1][1:]) - 1]["name"]
+        # Destination absente du GTFS : on prend le nom du terminus. L'ancien repli
+        # supposait des identifiants « S12 » et cassait sur tout autre réseau — la CUCM
+        # renseigne toujours trip_headsign, donc le défaut dormait.
+        headsign = (t.get("trip_headsign") or "").strip() or name_of_stop[seq[-1]]
         pk = (route_of[t["route_id"]], direction, seq)
         if pk not in patterns:
             pid = f"P{len(pattern_list) + 1}"

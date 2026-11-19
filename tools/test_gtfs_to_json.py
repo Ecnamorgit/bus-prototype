@@ -29,7 +29,8 @@ TRIPS = [("T1", "P", "S1", "MARCHE")]
 TIMES = [("T1", "1", 1, "08:00:00"), ("T1", "3", 2, "08:10:00"), ("T1", "4", 3, "08:20:00")]
 
 
-def ecrire_gtfs(chemin, stops):
+def ecrire_gtfs(chemin, stops, trips=None):
+    trips = TRIPS if trips is None else trips
     def csv_bloc(entete, lignes):
         return entete + "\n" + "\n".join(lignes) + "\n"
 
@@ -45,7 +46,7 @@ def ecrire_gtfs(chemin, stops):
             ["P,M1,Place - Centre,3,E11D48,FFFFFF"]))
         z.writestr("trips.txt", csv_bloc(
             "route_id,service_id,trip_id,trip_headsign,direction_id",
-            [f"{r},{s},{t},{h},0" for t, r, s, h in TRIPS]))
+            [f"{r},{s},{t},{h},0" for t, r, s, h in trips]))
         z.writestr("stop_times.txt", csv_bloc(
             "trip_id,arrival_time,departure_time,stop_id,stop_sequence",
             [f"{t},{hm},{hm},{s},{n}" for t, s, n, hm in TIMES]))
@@ -55,10 +56,10 @@ def ecrire_gtfs(chemin, stops):
         z.writestr("calendar_dates.txt", "service_id,date,exception_type\n")
 
 
-def convertir_vers_dict(stops, dossier, nom):
+def convertir_vers_dict(stops, dossier, nom, trips=None):
     src = os.path.join(dossier, nom + ".zip")
     dst = os.path.join(dossier, nom + ".json")
-    ecrire_gtfs(src, stops)
+    ecrire_gtfs(src, stops, trips)
     silence = io.StringIO()
     vrai_stdout, sys.stdout = sys.stdout, silence
     try:
@@ -117,6 +118,14 @@ def executer():
         verifier("un motif garde ses deux passages",
                  all(len(p["stops"]) == len(t["times"])
                      for p in apres["patterns"] for t in apres["trips"] if t["pattern"] == p["id"]))
+
+        print("Course sans destination déclarée")
+        # Quatre réseaux voisins sur cinq laissent trip_headsign vide : le convertisseur
+        # n'avait été éprouvé que sur un GTFS qui le renseigne toujours.
+        sans = convertir_vers_dict(STOPS, tmp, "sans_destination", trips=[("T1", "P", "S1", "")])
+        verifier("la destination devient le nom du terminus",
+                 [p["headsign"] for p in sans["patterns"]] == ["CENTRE COMMERCIAL"],
+                 [p["headsign"] for p in sans["patterns"]])
 
     print()
     if echecs:
