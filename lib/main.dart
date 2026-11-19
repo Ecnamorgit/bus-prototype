@@ -237,6 +237,9 @@ class _DeparturesScreenState extends State<DeparturesScreen> {
             child: Center(
               child: Semantics(
                 label: 'il est ${_hhmm(now)}',
+                // Sans cela le libelle s'ajoute au texte au lieu de le remplacer,
+                // et le lecteur d'ecran dit l'heure deux fois de suite.
+                excludeSemantics: true,
                 child: Text(_hhmm(now), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
               ),
             ),
@@ -450,11 +453,19 @@ class _NearbyBlock extends StatelessWidget {
                 leading: const Icon(Icons.place_outlined, color: kTeal),
                 title: Text(s.name, style: const TextStyle(fontWeight: FontWeight.w600, color: kInk)),
                 subtitle: Text('${formatDistance(d)} · ${sched.net.routesAtStop(s.id).map((r) => r.short).join(' · ')}'),
-                trailing: IconButton(
-                  tooltip: favorites.contains(s.id) ? 'Retirer des favoris' : 'Ajouter aux favoris',
-                  icon: Icon(favorites.contains(s.id) ? Icons.star : Icons.star_border,
-                      color: favorites.contains(s.id) ? const Color(0xFFFFB300) : Colors.black38),
-                  onPressed: () => onToggleFavorite(s.id),
+                trailing: Semantics(
+                  container: true,
+                  button: true,
+                  label: favorites.contains(s.id)
+                      ? 'Retirer ${s.name} des favoris'
+                      : 'Ajouter ${s.name} aux favoris',
+                  excludeSemantics: true,
+                  child: IconButton(
+                    tooltip: favorites.contains(s.id) ? 'Retirer des favoris' : 'Ajouter aux favoris',
+                    icon: Icon(favorites.contains(s.id) ? Icons.star : Icons.star_border,
+                        color: favorites.contains(s.id) ? const Color(0xFFFFB300) : Colors.black38),
+                    onPressed: () => onToggleFavorite(s.id),
+                  ),
                 ),
               ),
             ),
@@ -551,11 +562,26 @@ class _StopCard extends StatelessWidget {
                 const Icon(Icons.place, color: kTeal, size: 20),
                 const SizedBox(width: 6),
                 Expanded(child: Text(stop.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: kInk))),
-                IconButton(
-                  tooltip: isFavorite ? 'Retirer des favoris' : 'Ajouter aux favoris',
-                  onPressed: onToggleFavorite,
-                  icon: Icon(isFavorite ? Icons.star : Icons.star_border,
-                      color: isFavorite ? const Color(0xFFFFB300) : Colors.black38),
+                // Le tooltip seul ne ressortait pas dans l'arbre de semantique : le lecteur
+                // d'ecran annoncait « bouton », sans dire lequel, alors que c'est le seul moyen
+                // de retirer un arret des favoris. container: true lui rend un noeud a lui,
+                // donc un nom, et le nom de l'arret evite « lequel ? » quand il y en a six.
+                Semantics(
+                  container: true,
+                  button: true,
+                  label: isFavorite
+                      ? 'Retirer ${stop.name} des favoris'
+                      : 'Ajouter ${stop.name} aux favoris',
+                  excludeSemantics: true,
+                  child: IconButton(
+                    // Le tooltip reste : il s'affiche a l'appui long, et c'est la
+                    // convention Material. Il ne fait plus le travail du libelle,
+                    // que le Semantics ci-dessus porte explicitement.
+                    tooltip: isFavorite ? 'Retirer des favoris' : 'Ajouter aux favoris',
+                    onPressed: onToggleFavorite,
+                    icon: Icon(isFavorite ? Icons.star : Icons.star_border,
+                        color: isFavorite ? const Color(0xFFFFB300) : Colors.black38),
+                  ),
                 ),
               ],
             ),
@@ -608,23 +634,39 @@ class _DepartureRow extends StatelessWidget {
   final Departure d;
   final DateTime now;
 
+  /// Ce que le lecteur d'ecran annonce pour ce passage.
+  ///
+  /// Le delai d'abord, l'heure ensuite : c'est l'ordre dans lequel l'information sert,
+  /// et c'est celui de l'ecran. Au-dela d'une heure il n'y a plus de delai a dire.
+  String get _annonce {
+    final mins = d.minutesFrom(now);
+    if (mins >= 60) return 'ligne ${d.route.short}, vers ${d.headsign}, départ à ${_hhmm(d.scheduled)}';
+    final attente = mins <= 0 ? 'à quai' : (mins == 1 ? 'dans 1 minute' : 'dans $mins minutes');
+    return 'ligne ${d.route.short}, vers ${d.headsign}, $attente, départ prévu à ${_hhmm(d.scheduled)}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final mins = d.minutesFrom(now);
     final label = mins <= 0 ? 'à quai' : (mins < 60 ? '$mins min' : _hhmm(d.scheduled));
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        children: [
-          RouteBadge(route: d.route),
-          const SizedBox(width: 10),
-          Expanded(child: Text('vers ${d.headsign}', style: const TextStyle(fontSize: 14), overflow: TextOverflow.ellipsis)),
-          const SizedBox(width: 8),
-          // Le délai au-dessus de l'heure, et non à côté : à 1,6× de texte, les deux côte à côte
-          // débordent de la largeur d'un téléphone.
-          Semantics(
-            label: 'départ prévu à ${_hhmm(d.scheduled)}',
-            child: Column(
+    // Un passage = un arret de navigation, et une phrase. Sans ce container, la carte
+    // entiere se lisait d'un bloc — nom de l'arret, badge et les six departs dans une
+    // seule phrase — et on ne pouvait pas s'arreter sur celui qu'on cherchait.
+    return Semantics(
+      container: true,
+      label: _annonce,
+      excludeSemantics: true,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 5),
+        child: Row(
+          children: [
+            RouteBadge(route: d.route),
+            const SizedBox(width: 10),
+            Expanded(child: Text('vers ${d.headsign}', style: const TextStyle(fontSize: 14), overflow: TextOverflow.ellipsis)),
+            const SizedBox(width: 8),
+            // Le délai au-dessus de l'heure, et non à côté : à 1,6× de texte, les deux côte à côte
+            // débordent de la largeur d'un téléphone.
+            Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Container(
@@ -635,8 +677,8 @@ class _DepartureRow extends StatelessWidget {
                 if (mins < 60) Text(_hhmm(d.scheduled), style: const TextStyle(fontSize: 12, color: Colors.black54)),
               ],
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
